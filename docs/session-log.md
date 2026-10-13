@@ -81,11 +81,11 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | Fase 0 | investigasi JobStreet (selector terverifikasi + fixture) | ✅ | (commit docs) |
 | M6 | `parsers.py` (HTML → Job/JobDetail) + test fixture | ✅ | `a4967c2` |
 | M5 | scraper Playwright (`scraper.py`, HTML mentah) | ✅ | (commit m5) |
-| M7 | orkestrasi `cli.py` + `run()` penuh + flags | ✅ | (commit m7) |
-| M8 | hardening (retry, captcha, 0-hasil, pending backup) | ⬜ **berikutnya** | — |
-| M9 | penjadwalan + README + CI opsional | ⬜ | — |
+| M7 | orkestrasi `cli.py` + `run()` penuh + flags | ✅ | `187ec4d` |
+| M8 | hardening: retry, CAPTCHA, struktur berubah, pending backup, alert 0 | ✅ | `55abc8f` |
+| M9 | penjadwalan + README + CI opsional | ⬜ **berikutnya** | — |
 
-**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **140 passed** · coverage **98%** (cli 93%) · bandit ✅
+**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **145 passed** · coverage **98%** (cli 91%) · bandit ✅
 
 ---
 
@@ -278,18 +278,17 @@ Metode yang **gagal** (jangan diulang):
   Smoketest headed: **30 kartu** + detail terbaca (work_type, deskripsi 3733 char).
   Catatan: kontrak dipakai `iter_search_pages(...) -> Iterator[str]` (HTML per halaman), bukan
   `iter_cards`: selector tetap **hanya** di `parsers.py`, scraper tidak tahu apa itu "kartu".
-- **M7 — orkestrasi + CLI**: `cli.py` `run()` rangkai alur penuh (spec §8.1);
-  flag `--dry-run/--limit/--headed/--reset-rejected`; `_print_summary`; hentikan pagination
-  saat 0 kartu; `search_page_html()` ditambah di `scraper.py`.
-  Test: mock scraper, 140 test, coverage cli.py 93%.
+- **M8 — hardening**: `scraper._load` retry (`max_retries`); CAPTCHA detection
+  (`_check_captcha`); `cli.py` tangkap `StructureChangedError` (stop tanpa tulis separuh);
+  backup `data/pending_*.json` saat `WriterError` + drain pada run berikutnya;
+  peringatan "0 kartu di semua pencarian".
+  Test: 145 (91% cli coverage).
 
-### Berikutnya: **M8 — hardening**
-Retry/timeout per halaman, deteksi struktur berubah (`StructureChangedError`),
-deteksi CAPTCHA, backup `data/pending_*.json` bila gagal tulis, alert "0 hasil".
-Lihat EXECUTION-PLAN §8, T8.1–T8.5.
+### Berikutnya: **M9 — penjadwalan + README + CI opsional**
+`scripts/run.bat`, catatan Task Scheduler, README (cara pakai + catatan investigasi),
+CI GitHub Actions (lint+types+test, offline). Lihat EXECUTION-PLAN §8 T9.1–T9.3.
 
 ### Sisa milestone
-- **M8** hardening (retry, captcha, 0-hasil, pending backup)
 - **M9** penjadwalan (Task Scheduler) + README + CI opsional
 
 ---
@@ -306,8 +305,9 @@ Kerjakan per milestone sesuai EXECUTION-PLAN.md, dan BERHENTI di akhir setiap mi
 untuk saya verifikasi. Ikuti standar python-pro: type hints lengkap, mypy --strict,
 ruff, pytest >=90% coverage, bandit; jangan ubah spec; jangan menebak selector JobStreet.
 
-Status: M0–M7 + Fase 0 selesai. Lanjutkan dari M8 (hardening). Selector resmi di
-docs/fase0-hasil.md — jangan menebak. Scraper wajib headed bila Cloudflare muncul; jangan bypass.
+Status: M0–M8 + Fase 0 selesai. Lanjutkan dari M9 (jadwal + README + CI opsional).
+Selector resmi di docs/fase0-hasil.md — jangan menebak. Scraper wajib headed bila
+Cloudflare muncul; jangan bypass.
 Jalankan quality gate di akhir dan commit dengan Conventional Commits.
 ```
 
