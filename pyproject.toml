@@ -23,6 +23,11 @@ mypy_path = "src"
 module = ["gspread", "gspread.*"]
 ignore_missing_imports = true
 
+# openpyxl tidak menyertakan marker py.typed (stub resmi belum tersedia)
+[[tool.mypy.overrides]]
+module = ["openpyxl", "openpyxl.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
