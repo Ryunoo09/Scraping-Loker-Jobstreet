@@ -7,7 +7,16 @@ from pathlib import Path
 
 import pytest
 
-from job_scraper.config import AppConfig, load_config
+from job_scraper.config import (
+    AppConfig,
+    ExcelConfig,
+    FiltersConfig,
+    OutputConfig,
+    ScoringConfig,
+    ScraperConfig,
+    SearchConfig,
+    load_config,
+)
 from job_scraper.models import Job
 
 VALID_CONFIG_TEXT = """\
@@ -67,5 +76,28 @@ def make_job() -> Callable[..., Job]:
         }
         data.update(overrides)
         return Job.model_validate(data)
+
+    return _make
+
+
+@pytest.fixture
+def make_config() -> Callable[..., AppConfig]:
+    """Factory :class:`AppConfig` dengan nilai default wajar, mudah di-override."""
+
+    def _make(
+        *,
+        filters: FiltersConfig | None = None,
+        scoring: ScoringConfig | None = None,
+        output: OutputConfig | None = None,
+    ) -> AppConfig:
+        return AppConfig(
+            search=SearchConfig(keywords=["developer"], locations=["Semarang"]),
+            filters=filters if filters is not None else FiltersConfig(),
+            scoring=scoring if scoring is not None else ScoringConfig(),
+            output=(
+                output if output is not None else OutputConfig(type="excel", excel=ExcelConfig())
+            ),
+            scraper=ScraperConfig(),
+        )
 
     return _make

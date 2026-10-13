@@ -12,7 +12,7 @@
 > Spec tetap menjadi acuan tunggal untuk hal produk. Dokumen ini **tidak** menggantikan spec;
 > ia merujuk balik ke nomor bagian spec, mis. `(spec §6)`.
 
-Status: **M0 & M1 SELESAI** — menunggu verifikasimu sebelum M2.
+Status: **M0–M3 SELESAI** — menunggu verifikasimu sebelum M4.
 Bagian 4.2 mencatat keputusan akhir (venv + pip, Excel dulu, Fase 0 manual olehmu).
 
 ---
