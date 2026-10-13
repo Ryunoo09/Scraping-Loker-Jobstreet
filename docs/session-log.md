@@ -29,6 +29,8 @@ Dua topik dikerjakan dalam sesi ini:
 **Riwayat commit (terbaru di atas):**
 
 ```
+58b0c6e  feat(m4): excel and google sheets writers with build_writer factory
+ea32523  docs: add session handoff log (M0-M3 status, decisions, next steps)
 79f8d0b  feat(m3): filters and scoring
 5c53e94  feat(m2): SQLite dedup store (SeenJobsDB) with tests
 73752d6  chore: ignore local Sumopod model list file
@@ -38,6 +40,9 @@ cb714d7  feat(m1): domain models, config validation, logging, and check-config C
 8a5b3e1  chore(setup): bootstrap venv, deps, tooling config, and gitignore
 ca95c11  chore: initial commit (project planning + gitignore)
 ```
+
+> Setelah ini menyusul commit `docs(fase0)` (fixture + laporan selector) dan
+> `feat(m6)` (parser + test). Lihat `git log` untuk hash terbaru.
 
 ---
 
@@ -57,6 +62,10 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | 10 | `config.yaml` **tidak** di-commit → `.gitignore` + `config.example.yaml` |
 | 11 | Investigasi **Fase 0 dikerjakan oleh user** (agen tidak menebak selector) |
 | 12 | `Job` & `EvalResult` memakai Pydantic `BaseModel`; package di `src/job_scraper/` |
+| 13 | `JobDetail` (Pydantic) untuk field khusus halaman detail (deskripsi/tipe kerja/gaji) |
+| 14 | JobStreet di balik Cloudflare Turnstile → capture/run **headed**; **tidak** bypass proteksi |
+| 15 | Parser HTML pakai `beautifulsoup4` + `types-beautifulsoup4` (di luar daftar spec §4) |
+| 16 | Fixture di-commit dalam bentuk **disanitasi**; versi mentah di-gitignore |
 
 ---
 
@@ -68,14 +77,15 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | M1 | exceptions, models, config, utils, cli (`--check-config`) | ✅ | `cb714d7` |
 | M2 | `storage.py` (dedup SQLite) | ✅ | `5c53e94` |
 | M3 | `filters.py` (pra-filter + filter wajib + scoring) | ✅ | `79f8d0b` |
-| M4 | writers (Excel dulu, Google Sheets menyusul) | ⬜ **belum** | — |
-| M5 | scraper Playwright | ⬜ butuh Fase 0 | — |
-| M6 | parser + fixtures test | ⬜ butuh Fase 0 | — |
+| M4 | writers (Excel + Google Sheets + Null; `build_writer`) | ✅ | `58b0c6e` |
+| Fase 0 | investigasi JobStreet (selector terverifikasi + fixture) | ✅ | (commit docs) |
+| M6 | `parsers.py` (HTML → Job/JobDetail) + test fixture | ✅ | (commit m6) |
+| M5 | scraper Playwright | ⬜ **berikutnya** | — |
 | M7 | orkestrasi + CLI lengkap | ⬜ | — |
 | M8 | hardening (retry, captcha, 0-hasil, pending backup) | ⬜ | — |
 | M9 | penjadwalan + README + CI opsional | ⬜ | — |
 
-**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (16 file) · pytest **59 passed** · coverage **99.64%** · bandit ✅
+**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (23 file) · pytest **115 passed** · coverage **99%** (parsers 100%) · bandit ✅
 
 ---
 
@@ -97,6 +107,7 @@ Scraping Loker/
 ├── EXECUTION-PLAN.md           # rencana eksekusi (dibuat agen)
 ├── docs/
 │   ├── fase0-investigasi.md    # panduan investigasi Fase 0 (tugas user)
+│   ├── fase0-hasil.md          # HASIL Fase 0: selector terverifikasi + fixture
 │   └── session-log.md          # dokumen ini
 ├── .opencode/                  # GITIGNORED (dibaca OpenCode)
 │   ├── opencode.jsonc          # konfigurasi provider Sumopod
@@ -110,6 +121,12 @@ Scraping Loker/
 │   ├── utils.py                # setup_logging, random_delay, normalize_text
 │   ├── storage.py              # SeenJobsDB
 │   ├── filters.py              # passes_prefilter, evaluate
+│   ├── parsers.py              # HTML → Job/JobDetail (selector dari Fase 0)
+│   ├── writers/
+│   │   ├── __init__.py         # build_writer(cfg.output, dry_run=)
+│   │   ├── base.py             # JobWriter Protocol, NullWriter, HEADERS, job_to_row
+│   │   ├── excel.py            # ExcelWriter (openpyxl; simpan atomik, hyperlink)
+│   │   └── sheets.py           # GoogleSheetsWriter (gspread; append_rows batch)
 │   └── cli.py                  # --config, --check-config
 └── tests/
     ├── conftest.py             # fixture: valid_config_text, write_config, cfg, make_job, make_config
@@ -119,7 +136,15 @@ Scraping Loker/
     ├── test_utils.py
     ├── test_storage.py
     ├── test_filters.py
-    └── fixtures/               # (masih kosong) untuk HTML/JSON hasil Fase 0
+    ├── test_writers.py
+    ├── test_parsers.py         # berbasis fixture Fase 0 (offline)
+    └── fixtures/
+        ├── search_page_01.html # halaman hasil (bersih; 30 kartu)
+        ├── detail_01.html      # halaman detail (bersih)
+        └── _raw/               # mentah, GITIGNORED (memuat token/key)
+
+scripts/
+└── capture_fase0.py            # utilitas: ambil + sanitasi fixture Fase 0
 ```
 
 ---
@@ -212,33 +237,32 @@ Metode yang **gagal** (jangan diulang):
 5. **`opencode service restart`/`set env` menghentikan server** → dapat memutus perintah shell yang sedang
    berjalan dari dalam sesi OpenCode.
 6. **Playwright Chromium sudah terpasang** (`playwright install chromium`).
-7. Jangan menebak selector JobStreet — tunggu hasil Fase 0 (`docs/fase0-investigasi.md`).
+7. **JobStreet dilindungi Cloudflare Turnstile** — headless diblokir. Jalankan **headed** bila perlu
+   dan **jangan** mencoba melewati proteksi (spec §12). Selector resmi ada di `docs/fase0-hasil.md`.
+8. **Fixture mentah memuat token/key** (mis. `key_live_...`, `loginId`) → `tests/fixtures/_raw/`
+   dan `tests/hasil fase 0/` GITIGNORED. Versi yang di-commit sudah disanitasi.
 
 ---
 
 ## 10. Yang menunggu & langkah berikutnya
 
-### Berikutnya: **M4 — writers**
-```
-src/job_scraper/writers/
-  __init__.py    # build_writer(cfg.output) factory
-  base.py        # JobWriter Protocol + NullWriter (dry-run)
-  excel.py       # ExcelWriter (openpyxl; buat file+header; simpan atomik; append-only)
-  sheets.py      # GoogleSheetsWriter (gspread; batch append_rows) — di-mock saat test
-tests/test_writers.py
-```
-Header kolom (spec §7, 12 kolom): Tanggal Ditemukan, Posisi, Nama Perusahaan, Lokasi, Link Lowongan,
-Gaji, Tipe Kerja, Tanggal Posting, Skor, Status Lamaran, Catatan, Job ID.
-Sheets belum perlu setup GCP untuk lulus test (di-mock).
+### Selesai
+- **M4 — writers** (`58b0c6e`): `writers/` (base/excel/sheets) + `build_writer(cfg.output, dry_run=)`.
+- **Fase 0 — investigasi**: strip **Cloudflare Turnstile** (headless diblokir). Capture pakai
+  `scripts/capture_fase0.py` (browser headed, tanpa bypass). Fixture disanitasi (buang script/token;
+  raw di `tests/fixtures/_raw/`, gitignored). Selector terverifikasi → `docs/fase0-hasil.md`.
+- **M6 — parser**: `parsers.py` (`parse_search_page`, `parse_detail_page`, `parse_salary_min_idr`,
+  `apply_detail`) + `tests/test_parsers.py` (offline, fixture-driven). `JobDetail` ditambah ke `models.py`.
+- Dependensi baru: `beautifulsoup4` (runtime) + `types-beautifulsoup4` (dev) — di luar daftar spec §4,
+  diperlukan untuk parse HTML offline.
 
-### Blocker: **Fase 0** (tugas user)
-Panduan: `docs/fase0-investigasi.md`. Butuh: pola URL + pagination, lokasi Job ID, ada/tidaknya endpoint JSON,
-selector kartu & detail, dan 3–5 fixture HTML/JSON ke `tests/fixtures/`.
-**M5 & M6 tidak bisa mulai tanpa ini.**
+### Berikutnya: **M5 — scraper Playwright**
+`src/job_scraper/scraper.py`: `iter_cards`/`fetch_detail_html` (Playwright sinkron), pakai URL Fase 0:
+`/id/{keyword-slug}-jobs/in-{lokasi}?page=N` dan `/id/job/{id}`. **Wajib headed** bila Cloudflare muncul;
+jangan bypass. Logika parsing TIDAK di sini (ada di `parsers.py`).
 
 ### Sisa milestone
-- **M5** scraper Playwright (`scraper.py` ambil HTML mentah) + subsmoketest `--dry-run --limit 10`
-- **M6** `parsers.py` (HTML/JSON → `Job`) + `tests/test_parsers.py` (fixture-driven, offline)
+- **M5** scraper Playwright (ambil HTML mentah) + subsmoketest `--dry-run --limit 10`
 - **M7** orkestrasi `cli.py`/`main.py` + flag `--dry-run/--limit/--headed/--reset-rejected` + ringkasan
 - **M8** hardening: retry, deteksi selector hilang, CAPTCHA, backup `data/pending_*.json`, alert "0 hasil"
 - **M9** penjadwalan (Task Scheduler) + README + CI opsional
@@ -257,7 +281,8 @@ Kerjakan per milestone sesuai EXECUTION-PLAN.md, dan BERHENTI di akhir setiap mi
 untuk saya verifikasi. Ikuti standar python-pro: type hints lengkap, mypy --strict,
 ruff, pytest >=90% coverage, bandit; jangan ubah spec; jangan menebak selector JobStreet.
 
-Status: M0–M3 selesai. Lanjutkan dari M4 (writers: Excel dulu, Google Sheets di-mock saat test).
+Status: M0–M4 + Fase 0 + M6 selesai. Lanjutkan dari M5 (scraper Playwright; wajib headed bila
+Cloudflare muncul, jangan bypass). Selector resmi di docs/fase0-hasil.md — jangan menebak.
 Jalankan quality gate di akhir dan commit dengan Conventional Commits.
 ```
 
