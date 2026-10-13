@@ -83,9 +83,11 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | M5 | scraper Playwright (`scraper.py`, HTML mentah) | ✅ | (commit m5) |
 | M7 | orkestrasi `cli.py` + `run()` penuh + flags | ✅ | `187ec4d` |
 | M8 | hardening: retry, CAPTCHA, struktur berubah, pending backup, alert 0 | ✅ | `55abc8f` |
-| M9 | penjadwalan + README + CI opsional | ⬜ **berikutnya** | — |
+| M9 | penjadwalan + README + CI opsional | ✅ | (commit m9) |
 
 **Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **145 passed** · coverage **98%** (cli 91%) · bandit ✅
+
+> ✅ **Seluruh milestone dari M0–M9 + Fase 0 selesai.**
 
 ---
 
@@ -278,18 +280,15 @@ Metode yang **gagal** (jangan diulang):
   Smoketest headed: **30 kartu** + detail terbaca (work_type, deskripsi 3733 char).
   Catatan: kontrak dipakai `iter_search_pages(...) -> Iterator[str]` (HTML per halaman), bukan
   `iter_cards`: selector tetap **hanya** di `parsers.py`, scraper tidak tahu apa itu "kartu".
-- **M8 — hardening**: `scraper._load` retry (`max_retries`); CAPTCHA detection
-  (`_check_captcha`); `cli.py` tangkap `StructureChangedError` (stop tanpa tulis separuh);
-  backup `data/pending_*.json` saat `WriterError` + drain pada run berikutnya;
-  peringatan "0 kartu di semua pencarian".
-  Test: 145 (91% cli coverage).
+- **M9 — penjadwalan + README + CI**: `scripts/run.bat` (path absolut),
+  `scripts/schedule_windows.md` (panduan Task Scheduler), `README.md` (setup,
+  usage, investigasi, keamanan), `.github/workflows/ci.yml` (ruff, mypy, pytest
+  offline), `*.xlsx` ditambah ke `.gitignore`.
 
-### Berikutnya: **M9 — penjadwalan + README + CI opsional**
-`scripts/run.bat`, catatan Task Scheduler, README (cara pakai + catatan investigasi),
-CI GitHub Actions (lint+types+test, offline). Lihat EXECUTION-PLAN §8 T9.1–T9.3.
+---
 
-### Sisa milestone
-- **M9** penjadwalan (Task Scheduler) + README + CI opsional
+> ✅ **Semua milestone M0–M9 + Fase 0 selesai.** Lihat EXECUTION-PLAN §19
+> Definition of Done untuk status checklist.
 
 ---
 
