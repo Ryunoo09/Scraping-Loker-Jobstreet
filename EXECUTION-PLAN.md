@@ -12,7 +12,7 @@
 > Spec tetap menjadi acuan tunggal untuk hal produk. Dokumen ini **tidak** menggantikan spec;
 > ia merujuk balik ke nomor bagian spec, mis. `(spec §6)`.
 
-Status: **M0 (bootstrap & tooling) SELESAI** — menunggu verifikasimu sebelum M1.
+Status: **M0 & M1 SELESAI** — menunggu verifikasimu sebelum M2.
 Bagian 4.2 mencatat keputusan akhir (venv + pip, Excel dulu, Fase 0 manual olehmu).
 
 ---
@@ -185,6 +185,8 @@ Scraping Loker/
 ├── scripts/
 │   ├── run.bat                   # pemanggil untuk Task Scheduler
 │   └── schedule_windows.md       # catatan perintah schtasks
+├── docs/
+│   └── fase0-investigasi.md      # panduan investigasi (tugas kamu) + format hasil
 ├── src/
 │   └── job_scraper/
 │       ├── __init__.py
@@ -203,8 +205,10 @@ Scraping Loker/
 │       ├── parsers.py            # HTML/JSON → Job (murni, diuji fixtures)
 │       └── utils.py              # random_delay, normalize_text, logging setup
 └── tests/
-    ├── conftest.py               # fixtures: cfg, make_job
+    ├── conftest.py               # fixtures: cfg, make_job, write_config
     ├── test_config.py
+    ├── test_models.py
+    ├── test_cli.py
     ├── test_filters.py
     ├── test_storage.py
     ├── test_parsers.py
@@ -245,32 +249,37 @@ class Job(BaseModel):
     salary_text: str | None = None
     salary_min_idr: int | None = None
     work_type: str | None = None
-    posted_date: str | None = None       # ISO date bila tersedia
+    posted_date: str | None = None  # ISO date bila tersedia
     description: str | None = None
-    found_date: str                        # ISO date, diisi saat ditemukan
+    found_date: str  # ISO date, diisi saat ditemukan
     score: int = 0
+
 
 class EvalResult(BaseModel):
     passed: bool
     score: int = 0
     reason: str = ""
 
+
 # storage.py
 class SeenJobsDB:
     def __init__(self, path: Path) -> None: ...
     def has(self, job_id: str) -> bool: ...
     def mark(self, job: Job, status: str) -> None: ...
-    def reset_rejected(self) -> int: ...            # hapus status rejected_*
+    def reset_rejected(self) -> int: ...  # hapus status rejected_*
     def close(self) -> None: ...
+
 
 # filters.py  (fungsi murni, tanpa I/O)
 def passes_prefilter(job: Job, filters: FiltersConfig) -> bool: ...
 def evaluate(job: Job, cfg: AppConfig) -> EvalResult: ...
 
+
 # writers/base.py
 class JobWriter(Protocol):
     def ensure_header(self) -> None: ...
-    def append(self, jobs: Sequence[Job]) -> None: ...   # batch, sekali per run
+    def append(self, jobs: Sequence[Job]) -> None: ...  # batch, sekali per run
+
 
 # scraper.py  (butuh jaringan; mengembalikan data mentah, bukan Job)
 class JobSource(Protocol):

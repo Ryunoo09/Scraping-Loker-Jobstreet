@@ -1,0 +1,89 @@
+# ============================================================
+# Job Scraper JobStreet — CONTOH konfigurasi
+# Salin file ini menjadi config.yaml lalu sesuaikan.
+# Semua nilai di bawah bersifat ilustrasi.
+# ============================================================
+
+# ------------------------------------------------------------
+# BAGIAN 1: PENCARIAN
+# Program menelusuri setiap kombinasi keyword x lokasi.
+# ------------------------------------------------------------
+search:
+  keywords:
+    - "IT Support"
+    - "Junior Web Developer"
+    - "Backend Developer"
+  locations:
+    - "Semarang"
+    - "Jakarta Raya"
+    - "Yogyakarta"
+  posted_within_days: 7        # hanya lowongan N hari terakhir
+  max_pages_per_query: 3       # batas halaman per pencarian
+  fetch_detail: true           # buka halaman detail untuk deskripsi lengkap
+
+# ------------------------------------------------------------
+# BAGIAN 2: FILTER (lowongan harus lolos semua aturan wajib)
+# Pencocokan tidak membedakan huruf besar/kecil.
+# ------------------------------------------------------------
+filters:
+  exclude_title_keywords:
+    - "senior"
+    - "lead"
+    - "manager"
+    - "head of"
+    - "principal"
+  exclude_description_keywords:
+    - "minimal 3 tahun"
+    - "minimal 5 tahun"
+    - "min. 3 tahun"
+    - "at least 3 years"
+  exclude_companies: []          # contoh: ["PT Yang Dihindari"]
+  work_types:                    # [] = terima semua tipe
+    - "full time"
+    - "magang"
+  min_salary_idr: null           # null = tidak difilter
+  keep_if_salary_unknown: true   # tetap lolos bila gaji tidak dicantumkan
+
+# ------------------------------------------------------------
+# BAGIAN 3: SKOR KECOCOKAN (0-100)
+# ------------------------------------------------------------
+scoring:
+  min_score: 40
+  title_keywords:                # ada di judul = +bobot
+    "developer": 25
+    "support": 25
+    "junior": 15
+  description_keywords:          # ada di deskripsi = +bobot
+    "fresh graduate": 20
+    "python": 10
+    "fastapi": 10
+    "laravel": 5
+    "mysql": 5
+    "remote": 5
+  location_bonus:                # bonus bila lokasi mengandung teks ini
+    "Semarang": 10
+
+# ------------------------------------------------------------
+# BAGIAN 4: OUTPUT
+# type: "excel" (lokal, tanpa setup) atau "google_sheets"
+# ------------------------------------------------------------
+output:
+  type: "excel"
+  excel:
+    file_path: "data/jobs_local.xlsx"
+  # Isi bagian ini hanya bila type: "google_sheets"
+  # google_sheets:
+  #   spreadsheet_id: "ISI_ID_SPREADSHEET_DI_SINI"
+  #   worksheet_name: "Lowongan"
+  #   credentials_file: "credentials/service_account.json"
+
+# ------------------------------------------------------------
+# BAGIAN 5: PERILAKU SCRAPER (kesopanan & stabilitas)
+# ------------------------------------------------------------
+scraper:
+  headless: true               # false = browser terlihat (untuk debugging)
+  delay_min_sec: 3             # jeda acak antar permintaan
+  delay_max_sec: 8
+  page_timeout_sec: 30
+  max_retries: 2
+  max_jobs_per_run: 150        # batas keras per sekali jalan
