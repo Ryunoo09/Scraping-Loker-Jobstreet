@@ -12,6 +12,7 @@ bukan tebakan.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from types import TracebackType
 from typing import Protocol, Self
@@ -33,8 +34,10 @@ from playwright.sync_api import (
 )
 
 from .config import ScraperConfig
-from .exceptions import ScraperError
+from .exceptions import CaptchaDetectedError, ScraperError
 from .utils import random_delay
+
+logger = logging.getLogger(__name__)
 
 #: Basis situs JobStreet Indonesia (Fase 0 §1).
 BASE_URL = "https://id.jobstreet.com"
@@ -167,13 +170,34 @@ class Scraper:
         return html
 
     def _load(self, url: str) -> str:
-        """Navigasi ke ``url`` dan kembalikan HTML halaman; timeout → ScraperError."""
+        """Navigasi ke ``url`` dengan retry, deteksi CAPTCHA, lalu kembalikan HTML."""
         page = self._current_page
-        try:
-            page.goto(url, wait_until="domcontentloaded")
-            page.wait_for_load_state("load")
-        except PlaywrightTimeoutError as exc:
-            raise ScraperError(f"Timeout memuat {url}: {exc}") from exc
-        except PlaywrightError as exc:
-            raise ScraperError(f"Gagal memuat {url}: {exc}") from exc
-        return page.content()
+        last_err: Exception | None = None
+        for attempt in range(1 + self._cfg.max_retries):
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_load_state("load")
+                self._check_captcha()
+                return page.content()
+            except PlaywrightTimeoutError as exc:
+                last_err = exc
+                if attempt < self._cfg.max_retries:
+                    logger.warning(
+                        "Timeout %s (percobaan %d/%d)", url, attempt + 1, self._cfg.max_retries
+                    )
+                    random_delay(self._cfg.delay_min_sec, self._cfg.delay_max_sec)
+                    continue
+                raise ScraperError(
+                    f"Timeout memuat {url} setelah {attempt + 1} percobaan: {exc}"
+                ) from exc
+            except PlaywrightError as exc:
+                raise ScraperError(f"Gagal memuat {url}: {exc}") from exc
+        raise ScraperError(f"Timeout memuat {url}: {last_err}")
+
+    def _check_captcha(self) -> None:
+        """Lempar CaptchaDetectedError bila halaman verifikasi Cloudflare terdeteksi."""
+        title = self._current_page.title()
+        if "tunggu sebentar" in title.lower():
+            raise CaptchaDetectedError(
+                "Halaman verifikasi Cloudflare terdeteksi — hentikan scraping."
+            )

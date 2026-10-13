@@ -5,6 +5,7 @@ Sebisa mungkin diuji offline; ``Scraper`` di-mock untuk menghindari browser.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from job_scraper.config import (
     ScoringConfig,
     SearchConfig,
 )
-from job_scraper.exceptions import ScraperError, WriterError
+from job_scraper.exceptions import CaptchaDetectedError, ScraperError, WriterError
 from job_scraper.models import Job
 from job_scraper.parsers import parse_search_page
 from job_scraper.storage import SeenJobsDB
@@ -449,3 +450,153 @@ def test_main_empty_search_page_stops_pagination(
     main(["--config", str(path), "--dry-run"])
 
     assert len(calls) == 1  # hanya halaman 1
+
+
+# --------------------------------------------------------------------------- #
+# M8 hardening tests
+# --------------------------------------------------------------------------- #
+
+
+_CONFIG_MIN = """
+search:
+  keywords: ["Backend Developer"]
+  locations: ["Semarang"]
+filters: {}
+scoring:
+  min_score: 0
+output:
+  type: "excel"
+  excel:
+    file_path: "jobs.xlsx"
+scraper:
+  delay_min_sec: 1
+  delay_max_sec: 2
+"""
+
+
+def test_main_captcha_stops_run(
+    write_config: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CaptchaDetectedError → exit 1."""
+
+    class _CaptchaSource(_FakeSource):
+        def search_page_html(self, kw: str, loc: str, page: int) -> str:
+            raise CaptchaDetectedError("challenge")
+
+    monkeypatch.setattr("job_scraper.cli.Scraper", _CaptchaSource)
+    monkeypatch.setattr("job_scraper.cli._DATA", write_config("").parent / "_data")
+    monkeypatch.setattr("job_scraper.cli._LOG_DIR", write_config("").parent / "_logs")
+
+    path = write_config(_CONFIG_MIN)
+    code = main(["--config", str(path), "--limit", "5"])
+    assert code == 1
+    assert "CAPTCHA" in capsys.readouterr().err
+
+
+def test_main_scraper_error_breaks_pagination(
+    write_config: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """ScraperError dari halaman → log error + lanjut keyword berikutnya."""
+
+    class _ErrorSource(_FakeSource):
+        def search_page_html(self, kw: str, loc: str, page: int) -> str:
+            raise ScraperError("network broken")
+
+    monkeypatch.setattr("job_scraper.cli.Scraper", _ErrorSource)
+    monkeypatch.setattr("job_scraper.cli._DATA", write_config("").parent / "_data")
+    monkeypatch.setattr("job_scraper.cli._LOG_DIR", write_config("").parent / "_logs")
+
+    path = write_config(_CONFIG_MIN)
+    code = main(["--config", str(path), "--dry-run"])
+    # Error per halaman → break pagination + lanjut; tapi 0 kartu → return 0
+    assert code == 0
+
+
+def test_main_structure_changed_stops_run(
+    write_config: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """StructureChangedError dari parse → exit 1."""
+    from job_scraper.exceptions import StructureChangedError
+
+    class _BrokenSource(_FakeSource):
+        def search_page_html(self, kw: str, loc: str, page: int) -> str:
+            return "<html><body>no cards</body></html>"
+
+    monkeypatch.setattr("job_scraper.cli.Scraper", _BrokenSource)
+    monkeypatch.setattr("job_scraper.cli._DATA", write_config("").parent / "_data")
+    monkeypatch.setattr("job_scraper.cli._LOG_DIR", write_config("").parent / "_logs")
+
+    # Patch parse so it crashes even on empty page
+    monkeypatch.setattr(
+        "job_scraper.cli.parse_search_page",
+        lambda html: (_ for _ in ()).throw(StructureChangedError("bad")),
+    )
+
+    path = write_config(_CONFIG_MIN)
+    code = main(["--config", str(path), "--limit", "5"])
+    assert code == 1
+
+
+def test_main_writer_error_backs_up_pending(
+    write_config: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """WriterError → backup file dibuat."""
+    from job_scraper.writers import ExcelWriter
+
+    monkeypatch.setattr("job_scraper.cli.Scraper", _FakeSource)
+    data_dir = write_config("").parent / "_data"
+    monkeypatch.setattr("job_scraper.cli._DATA", data_dir)
+    monkeypatch.setattr("job_scraper.cli._LOG_DIR", write_config("").parent / "_logs")
+
+    def _fail_append(*a: object, **kw: object) -> None:
+        raise WriterError("write failed")
+
+    monkeypatch.setattr(ExcelWriter, "append", _fail_append)
+
+    path = write_config(_CONFIG_MIN)
+    code = main(["--config", str(path), "--limit", "10"])
+    assert code == 1
+    pending = list(data_dir.glob("pending_*.json"))
+    assert len(pending) == 1
+    data = json.loads(pending[0].read_text(encoding="utf-8"))
+    assert len(data) >= 1
+
+
+def test_main_zero_cards_alert(
+    write_config: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """0 kartu → peringatan dicetak."""
+
+    class _EmptySource:
+        def __init__(self, *a: object) -> None:
+            pass
+
+        def __enter__(self) -> _EmptySource:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+        def search_page_html(self, kw: str, loc: str, page: int) -> str:
+            return "<html></html>"
+
+        def fetch_detail_html(self, url: str) -> str:
+            return "<html></html>"
+
+    monkeypatch.setattr("job_scraper.cli.Scraper", _EmptySource)
+    monkeypatch.setattr("job_scraper.cli._DATA", write_config("").parent / "_data")
+    monkeypatch.setattr("job_scraper.cli._LOG_DIR", write_config("").parent / "_logs")
+
+    path = write_config(_CONFIG_MIN)
+    code = main(["--config", str(path), "--dry-run"])
+    assert code == 0
+    assert "tidak ada kartu" in capsys.readouterr().err.lower()

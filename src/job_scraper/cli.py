@@ -10,14 +10,23 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections import Counter
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 
 from .config import AppConfig, load_config
-from .exceptions import ConfigError, JobScraperError, ScraperError, WriterError
+from .exceptions import (
+    CaptchaDetectedError,
+    ConfigError,
+    JobScraperError,
+    ScraperError,
+    StructureChangedError,
+    WriterError,
+)
 from .filters import evaluate, passes_prefilter
 from .models import Job
 from .parsers import apply_detail, parse_detail_page, parse_search_page
@@ -84,6 +93,30 @@ def _print_summary(
     print("=" * 40)
 
 
+def _backup_pending(jobs: list[Job]) -> None:
+    """Simpan lowongan yang gagal ditulis ke file JSON cadangan."""
+    if not jobs:
+        return
+    _DATA.mkdir(parents=True, exist_ok=True)
+    data = [j.model_dump(mode="json") for j in jobs]
+    path = _DATA / f"pending_{date.today().isoformat()}.json"
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("Cadangan %d lowongan ke %s", len(jobs), path)
+
+
+def _drain_pending(writer: object) -> None:
+    """Tulis ulang lowongan dari file cadangan run sebelumnya."""
+    for path in sorted(_DATA.glob("pending_*.json")):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            jobs = [Job.model_validate(j) for j in raw]
+            writer.append(jobs)  # type: ignore[attr-defined]
+            path.unlink()
+            logger.info("Memulihkan %d lowongan dari %s", len(jobs), path.name)
+        except (OSError, WriterError) as exc:
+            logger.warning("Gagal memulihkan %s: %s", path.name, exc)
+
+
 def run(config_path: Path, args: argparse.Namespace) -> int:
     """Jalankan alur scraping penuh (spec §8.1).
 
@@ -111,6 +144,9 @@ def run(config_path: Path, args: argparse.Namespace) -> int:
 
         writer = build_writer(cfg.output, dry_run=args.dry_run)
 
+        if not args.dry_run:
+            _drain_pending(writer)
+
         with Scraper(cfg.scraper) as source:
             for keyword in cfg.search.keywords:
                 for location in cfg.search.locations:
@@ -121,6 +157,9 @@ def run(config_path: Path, args: argparse.Namespace) -> int:
 
                         try:
                             page_html = source.search_page_html(keyword, location, page_no)
+                        except CaptchaDetectedError as exc:
+                            logger.error("CAPTCHA terdeteksi: %s — menghentikan run.", exc)
+                            return 1
                         except ScraperError as exc:
                             logger.error(
                                 "Gagal memuat halaman %d (%s/%s): %s",
@@ -131,7 +170,16 @@ def run(config_path: Path, args: argparse.Namespace) -> int:
                             )
                             break
 
-                        cards = parse_search_page(page_html)
+                        try:
+                            cards = parse_search_page(page_html)
+                        except StructureChangedError as exc:
+                            logger.error(
+                                "Struktur JobStreet berubah (halaman %d): %s"
+                                " — menghentikan scraping",
+                                page_no,
+                                exc,
+                            )
+                            return 1
                         if not cards:
                             logger.info(
                                 "0 kartu di halaman %d (%s/%s) — hentikan pagination",
@@ -165,10 +213,20 @@ def run(config_path: Path, args: argparse.Namespace) -> int:
             stats["ditulis"] = len(new_matches)
         except WriterError as exc:
             logger.exception("Gagal menulis hasil: %s", exc)
+            _backup_pending(new_matches)
             return 1
 
     output_desc = _describe_output(cfg)
     _print_summary(stats, new_matches, output_desc, dry_run=args.dry_run)
+
+    if stats.get("dilihat", 0) == 0:
+        msg = (
+            "⚠️  Tidak ada kartu di semua pencarian"
+            " — kemungkinan scraper rusak atau JobStreet berubah."
+        )
+        logger.warning(msg)
+        print(msg, file=sys.stderr)
+
     return 0
 
 
