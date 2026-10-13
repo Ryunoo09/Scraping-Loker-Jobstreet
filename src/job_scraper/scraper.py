@@ -45,8 +45,8 @@ _VIEWPORT: ViewportSize = {"width": 1366, "height": 900}
 class JobSource(Protocol):
     """Kontrak sumber HTML mentah (dipakai orkestrasi; mudah di-fake saat test)."""
 
-    def iter_search_pages(self, keyword: str, location: str, *, max_pages: int) -> Iterator[str]:
-        """Hasilkan HTML halaman hasil pencarian untuk tiap nomor halaman."""
+    def search_page_html(self, keyword: str, location: str, page: int) -> str:
+        """Ambil HTML satu halaman hasil (murni, tanpa jeda)."""
         ...
 
     def fetch_detail_html(self, url: str) -> str:
@@ -151,6 +151,14 @@ class Scraper:
             yield self._load(build_search_url(keyword, location, page_no))
             if page_no < max_pages:
                 random_delay(self._cfg.delay_min_sec, self._cfg.delay_max_sec)
+
+    def search_page_html(self, keyword: str, location: str, page: int) -> str:
+        """Ambil HTML satu halaman hasil (tanpa jeda).
+
+        Dipakai orkestrasi untuk kontrol pagination yang lebih halus
+        (hentikan lebih awal bila 0 kartu).
+        """
+        return self._load(build_search_url(keyword, location, page))
 
     def fetch_detail_html(self, url: str) -> str:
         """Ambil HTML satu halaman detail, lalu jeda acak (kesopanan, spec §12)."""

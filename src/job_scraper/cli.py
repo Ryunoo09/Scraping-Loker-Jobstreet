@@ -1,35 +1,237 @@
 """Command-line interface (argparse).
 
-Milestone M1 hanya menyediakan ``--config`` dan ``--check-config``. Opsi lain
-(``--dry-run``, ``--limit``, ``--headed``, ``--reset-rejected``) ditambahkan di M7.
+``main()`` membaca argumen lalu menjalankan salah satu:
+
+* ``--check-config`` — validasi config lalu keluar.
+* ``run()`` — alur penuh: config → scraper → parser → dedup → filter → scoring → writer
+  (spec §8.1, EXECUTION-PLAN §7.1-7.4).
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
-from .config import load_config
-from .exceptions import ConfigError
+from .config import AppConfig, load_config
+from .exceptions import ConfigError, JobScraperError, ScraperError, WriterError
+from .filters import evaluate, passes_prefilter
+from .models import Job
+from .parsers import apply_detail, parse_detail_page, parse_search_page
+from .scraper import JobSource, Scraper
+from .storage import SeenJobsDB
+from .utils import random_delay, setup_logging
+from .writers import build_writer
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = "config.yaml"
 
+# Direktori proyek (resolved dari lokasi module ini: src/job_scraper/cli.py).
+_ROOT = Path(__file__).resolve().parent.parent.parent
+_DATA = _ROOT / "data"
+_LOG_DIR = _ROOT / "logs"
+
 
 def build_parser() -> argparse.ArgumentParser:
-    """Bangun parser argumen untuk aplikasi."""
+    """Bangun parser argumen dengan semua flag (spec §8 Fase 7)."""
     parser = argparse.ArgumentParser(
         prog="job-scraper",
         description="Mengumpulkan lowongan JobStreet yang cocok ke spreadsheet.",
     )
-    parser.add_argument("--config", default=DEFAULT_CONFIG, help="path ke config.yaml")
+    parser.add_argument("--config", default=str(_ROOT / DEFAULT_CONFIG), help="path ke config.yaml")
+    parser.add_argument("--check-config", action="store_true", help="validasi config lalu keluar")
     parser.add_argument(
-        "--check-config",
+        "--dry-run", action="store_true", help="simulasi tanpa menulis ke db/spreadsheet"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, metavar="N", help="batasi jumlah lowongan yang diproses"
+    )
+    parser.add_argument("--headed", action="store_true", help="tampilkan browser (headless=false)")
+    parser.add_argument(
+        "--reset-rejected",
         action="store_true",
-        help="validasi config lalu keluar tanpa scraping",
+        help="hapus catatan lowongan yang ditolak, biar dinilai ulang",
     )
     return parser
+
+
+def _print_summary(
+    stats: Counter[str],
+    new_matches: list[Job],
+    output_desc: str,
+    *,
+    dry_run: bool,
+) -> None:
+    """Cetak ringkasan akhir ke terminal."""
+    print("=" * 40)
+    print("Ringkasan:")
+    print(f"  Dilihat:       {stats.get('dilihat', 0)}")
+    print(f"  Baru:          {stats.get('baru', 0)}")
+    for key in ("duplikat", "ditolak", "lolos"):
+        count = stats.get(key, 0)
+        if count:
+            print(f"  {key.capitalize()}:      {count}")
+    if dry_run:
+        print("  Ditulis:       (dry-run, tidak ditulis)")
+    elif new_matches:
+        print(f"  Ditulis:       {len(new_matches)} -> {output_desc}")
+    else:
+        print("  Ditulis:       0 (tidak ada lowongan baru yang lolos)")
+    print("=" * 40)
+
+
+def run(config_path: Path, args: argparse.Namespace) -> int:
+    """Jalankan alur scraping penuh (spec §8.1).
+
+    Returns:
+        Exit code (0 sukses, 1 ada error).
+    """
+    cfg = load_config(config_path)
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    setup_logging(_LOG_DIR / "scraper.log")
+    logger.info("Job-scraper dimulai (config=%s)", config_path)
+
+    if args.headed:
+        cfg.scraper.headless = False
+
+    stats: Counter[str] = Counter()
+    new_matches: list[Job] = []
+
+    db_path = _DATA / "seen_jobs.db"
+    _DATA.mkdir(parents=True, exist_ok=True)
+
+    with SeenJobsDB(db_path) as db:
+        if args.reset_rejected:
+            removed = db.reset_rejected()
+            logger.info("Reset %d rejected lowongan", removed)
+
+        writer = build_writer(cfg.output, dry_run=args.dry_run)
+
+        with Scraper(cfg.scraper) as source:
+            for keyword in cfg.search.keywords:
+                for location in cfg.search.locations:
+                    pagination_stopped = False
+                    for page_no in range(1, cfg.search.max_pages_per_query + 1):
+                        if pagination_stopped or (args.limit and stats["dilihat"] >= args.limit):
+                            break
+
+                        try:
+                            page_html = source.search_page_html(keyword, location, page_no)
+                        except ScraperError as exc:
+                            logger.error(
+                                "Gagal memuat halaman %d (%s/%s): %s",
+                                page_no,
+                                keyword,
+                                location,
+                                exc,
+                            )
+                            break
+
+                        cards = parse_search_page(page_html)
+                        if not cards:
+                            logger.info(
+                                "0 kartu di halaman %d (%s/%s) — hentikan pagination",
+                                page_no,
+                                keyword,
+                                location,
+                            )
+                            pagination_stopped = True
+                            continue
+
+                        if page_no < cfg.search.max_pages_per_query:
+                            random_delay(cfg.scraper.delay_min_sec, cfg.scraper.delay_max_sec)
+
+                        _process_cards(
+                            cards=cards,
+                            cfg=cfg,
+                            db=db,
+                            source=source,
+                            stats=stats,
+                            new_matches=new_matches,
+                            limit=args.limit,
+                            dry_run=args.dry_run,
+                        )
+
+                        if args.limit and stats["dilihat"] >= args.limit:
+                            break
+
+    if new_matches:
+        try:
+            writer.append(new_matches)
+            stats["ditulis"] = len(new_matches)
+        except WriterError as exc:
+            logger.exception("Gagal menulis hasil: %s", exc)
+            return 1
+
+    output_desc = _describe_output(cfg)
+    _print_summary(stats, new_matches, output_desc, dry_run=args.dry_run)
+    return 0
+
+
+def _process_cards(
+    cards: list[Job],
+    cfg: AppConfig,
+    db: SeenJobsDB,
+    source: JobSource,
+    stats: Counter[str],
+    new_matches: list[Job],
+    limit: int,
+    dry_run: bool,
+) -> None:
+    """Proses satu halaman kartu: dedup, pra-filter, detail, filter, scoring."""
+    for job in cards:
+        if limit and stats["dilihat"] >= limit:
+            return
+
+        stats["dilihat"] += 1
+
+        if db.has(job.job_id):
+            stats["duplikat"] += 1
+            continue
+
+        stats["baru"] += 1
+
+        if not passes_prefilter(job, cfg.filters):
+            if not dry_run:
+                db.mark(job, status="rejected_title")
+            stats["ditolak"] += 1
+            continue
+
+        if cfg.search.fetch_detail:
+            try:
+                detail_html = source.fetch_detail_html(job.url)
+            except ScraperError as exc:
+                logger.warning("Gagal ambil detail %s: %s", job.job_id, exc)
+                continue
+            detail = parse_detail_page(detail_html)
+            job = apply_detail(job, detail)
+
+        result = evaluate(job, cfg)
+
+        if result.passed:
+            job.score = result.score
+            new_matches.append(job)
+            if not dry_run:
+                db.mark(job, status="matched")
+            stats["lolos"] += 1
+        else:
+            if not dry_run:
+                db.mark(job, status=f"rejected_{result.reason}")
+            stats["ditolak"] += 1
+
+
+def _describe_output(cfg: AppConfig) -> str:
+    """Kembalikan deskripsi output (path atau spreadsheet ID)."""
+    out = cfg.output
+    if out.type == "excel" and out.excel:
+        return out.excel.file_path
+    if out.type == "google_sheets" and out.google_sheets:
+        return f"Sheets({out.google_sheets.spreadsheet_id})"
+    return str(out.type)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -39,7 +241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Argumen baris perintah; ``None`` berarti ``sys.argv``.
 
     Returns:
-        Exit code (0 sukses, 2 config tidak valid).
+        Exit code (0 sukses, 1 error runtime, 2 config invalid).
     """
     args = build_parser().parse_args(argv)
     config_path = Path(args.config)
@@ -54,5 +256,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Config valid: {config_path}")
         return 0
 
-    print("Alur scraping belum diimplementasikan (menyusul di milestone berikutnya).")
-    return 0
+    try:
+        return run(config_path, args)
+    except JobScraperError as exc:
+        logger.exception("Job-scraper gagal: %s", exc)
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
