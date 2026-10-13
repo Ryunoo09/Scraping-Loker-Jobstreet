@@ -26,6 +26,14 @@ config.yaml
 models_sumopod.md
 
 # ============================================================
+# Hasil investigasi Fase 0 (mentah)
+# ============================================================
+# Laporan mentah & fixture mentah memuat token pelacak + key dari sesi browser
+# (mis. key_live_..., loginId). Jangan di-commit.
+tests/hasil fase 0/
+tests/fixtures/_raw/
+
+# ============================================================
 # Python
 # ============================================================
 __pycache__/
