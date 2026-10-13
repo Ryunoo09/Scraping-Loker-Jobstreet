@@ -1,0 +1,35 @@
+# Konfigurasi tooling saja (ruff, mypy, pytest, coverage).
+# Dependensi proyek ada di requirements.txt / requirements-dev.txt
+# (proyek ini memakai venv + pip, bukan uv), jadi tidak ada seksi [project] di sini.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["src", "tests", "main.py"]
+mypy_path = "src"
+
+# gspread belum menyediakan stub resmi
+[[tool.mypy.overrides]]
+module = ["gspread", "gspread.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["job_scraper"]
+# jalur jaringan yang tidak mungkin di-unit-test (lihat EXECUTION-PLAN.md Bagian 3.2)
+omit = ["src/job_scraper/scraper.py"]
+
+[tool.coverage.report]
+show_missing = true

@@ -1,22 +1,52 @@
-# OpenCode local config (agents & skills)
+# ============================================================
+# OpenCode lokal (agent & skill) — tidak untuk dipublikasikan
+# ============================================================
 .opencode/
 
-# Environment / secrets
+# ============================================================
+# Rahasia & kredensial (JANGAN PERNAH di-commit)
+# ============================================================
+credentials/
+*.pem
 .env
 .env.*
 
+# ============================================================
+# Data runtime & log (dibuat otomatis oleh program)
+# ============================================================
+data/
+logs/
+
+# ============================================================
+# Kriteria pribadi (Q4: config.yaml tidak di-commit)
+# ============================================================
+config.yaml
+
+# ============================================================
 # Python
+# ============================================================
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 env/
-*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
 
-# Node
+# ============================================================
+# Node (bila ada tooling tambahan)
+# ============================================================
 node_modules/
 
+# ============================================================
 # OS / editor
+# ============================================================
 .DS_Store
 Thumbs.db
