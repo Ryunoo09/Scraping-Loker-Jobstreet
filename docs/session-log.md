@@ -81,11 +81,11 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | Fase 0 | investigasi JobStreet (selector terverifikasi + fixture) | ✅ | (commit docs) |
 | M6 | `parsers.py` (HTML → Job/JobDetail) + test fixture | ✅ | `a4967c2` |
 | M5 | scraper Playwright (`scraper.py`, HTML mentah) | ✅ | (commit m5) |
-| M7 | orkestrasi + CLI lengkap | ⬜ **berikutnya** | — |
-| M8 | hardening (retry, captcha, 0-hasil, pending backup) | ⬜ | — |
+| M7 | orkestrasi `cli.py` + `run()` penuh + flags | ✅ | (commit m7) |
+| M8 | hardening (retry, captcha, 0-hasil, pending backup) | ⬜ **berikutnya** | — |
 | M9 | penjadwalan + README + CI opsional | ⬜ | — |
 
-**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **122 passed** · coverage **99%** (parsers 100%) · bandit ✅
+**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **140 passed** · coverage **98%** (cli 93%) · bandit ✅
 
 ---
 
@@ -278,17 +278,18 @@ Metode yang **gagal** (jangan diulang):
   Smoketest headed: **30 kartu** + detail terbaca (work_type, deskripsi 3733 char).
   Catatan: kontrak dipakai `iter_search_pages(...) -> Iterator[str]` (HTML per halaman), bukan
   `iter_cards`: selector tetap **hanya** di `parsers.py`, scraper tidak tahu apa itu "kartu".
-- Dependensi baru: `beautifulsoup4` (runtime) + `types-beautifulsoup4` (dev) — di luar daftar spec §4,
-  diperlukan untuk parse HTML offline.
+- **M7 — orkestrasi + CLI**: `cli.py` `run()` rangkai alur penuh (spec §8.1);
+  flag `--dry-run/--limit/--headed/--reset-rejected`; `_print_summary`; hentikan pagination
+  saat 0 kartu; `search_page_html()` ditambah di `scraper.py`.
+  Test: mock scraper, 140 test, coverage cli.py 93%.
 
-### Berikutnya: **M7 — orkestrasi + CLI**
-Rangkai `config → scraper → parsers → dedup → filters → writers` di `cli.run()` + flag
-`--dry-run/--limit/--headed/--reset-rejected`, `Stats`, ringkasan terminal (spec §8.1, EXECUTION-PLAN §6).
-Hentikan halaman hasil saat 0 kartu (diputuskan di orkestrasi, karena butuh hasil parse).
+### Berikutnya: **M8 — hardening**
+Retry/timeout per halaman, deteksi struktur berubah (`StructureChangedError`),
+deteksi CAPTCHA, backup `data/pending_*.json` bila gagal tulis, alert "0 hasil".
+Lihat EXECUTION-PLAN §8, T8.1–T8.5.
 
 ### Sisa milestone
-- **M7** orkestrasi `cli.py`/`main.py` + flag lengkap + ringkasan
-- **M8** hardening: retry, deteksi selector hilang, CAPTCHA, backup `data/pending_*.json`, alert "0 hasil"
+- **M8** hardening (retry, captcha, 0-hasil, pending backup)
 - **M9** penjadwalan (Task Scheduler) + README + CI opsional
 
 ---
@@ -305,7 +306,7 @@ Kerjakan per milestone sesuai EXECUTION-PLAN.md, dan BERHENTI di akhir setiap mi
 untuk saya verifikasi. Ikuti standar python-pro: type hints lengkap, mypy --strict,
 ruff, pytest >=90% coverage, bandit; jangan ubah spec; jangan menebak selector JobStreet.
 
-Status: M0–M6 + Fase 0 selesai. Lanjutkan dari M7 (orkestrasi + CLI). Selector resmi di
+Status: M0–M7 + Fase 0 selesai. Lanjutkan dari M8 (hardening). Selector resmi di
 docs/fase0-hasil.md — jangan menebak. Scraper wajib headed bila Cloudflare muncul; jangan bypass.
 Jalankan quality gate di akhir dan commit dengan Conventional Commits.
 ```
