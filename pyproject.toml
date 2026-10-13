@@ -5,6 +5,8 @@
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Jangan sentuh file dokumentasi: ruff format memformat blok kode di dalam Markdown.
+extend-exclude = ["*.md", "docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

@@ -396,10 +396,10 @@ Kriteria selesai: program berjalan sendiri pada jam yang ditentukan dan baris ba
 
 ```python
 def run(args):
-    cfg = load_config(args.config)  # validasi Pydantic
+    cfg = load_config(args.config)                 # validasi Pydantic
     setup_logging()
     db = SeenJobsDB("data/seen_jobs.db")
-    writer = build_writer(cfg.output)  # Sheets atau Excel
+    writer = build_writer(cfg.output)              # Sheets atau Excel
 
     new_matches = []
     stats = Counter()
@@ -413,14 +413,14 @@ def run(args):
                         stats["duplikat"] += 1
                         continue
 
-                    if not passes_prefilter(job, cfg.filters):  # cek judul dulu
+                    if not passes_prefilter(job, cfg.filters):    # cek judul dulu
                         db.mark(job, status="rejected_title")
                         continue
 
                     if cfg.search.fetch_detail:
                         job.description = scraper.fetch_description(job.url)
 
-                    result = evaluate(job, cfg)  # filter + skor
+                    result = evaluate(job, cfg)                    # filter + skor
                     if result.passed:
                         job.score = result.score
                         new_matches.append(job)
@@ -456,13 +456,11 @@ def run(args):
 ```python
 from dataclasses import dataclass
 
-
 @dataclass
 class EvalResult:
     passed: bool
     score: int = 0
     reason: str = ""
-
 
 def _contains_any(text: str, keywords: list[str]) -> str | None:
     t = text.lower()
@@ -471,14 +469,12 @@ def _contains_any(text: str, keywords: list[str]) -> str | None:
             return kw
     return None
 
-
 def passes_prefilter(job, filters) -> bool:
     if _contains_any(job.title, filters.exclude_title_keywords):
         return False
     if _contains_any(job.company, filters.exclude_companies):
         return False
     return True
-
 
 def evaluate(job, cfg) -> EvalResult:
     f, s = cfg.filters, cfg.scoring
@@ -568,20 +564,10 @@ Skeleton `sheet_writer.py` (Google Sheets):
 import gspread
 
 HEADERS = [
-    "Tanggal Ditemukan",
-    "Posisi",
-    "Nama Perusahaan",
-    "Lokasi",
-    "Link Lowongan",
-    "Gaji",
-    "Tipe Kerja",
-    "Tanggal Posting",
-    "Skor",
-    "Status Lamaran",
-    "Catatan",
-    "Job ID",
+    "Tanggal Ditemukan", "Posisi", "Nama Perusahaan", "Lokasi",
+    "Link Lowongan", "Gaji", "Tipe Kerja", "Tanggal Posting",
+    "Skor", "Status Lamaran", "Catatan", "Job ID",
 ]
-
 
 class GoogleSheetWriter:
     def __init__(self, cfg):
@@ -598,23 +584,11 @@ class GoogleSheetWriter:
     def append(self, jobs):
         if not jobs:
             return
-        rows = [
-            [
-                j.found_date,
-                j.title,
-                j.company,
-                j.location,
-                j.url,
-                j.salary or "",
-                j.work_type or "",
-                j.posted_date or "",
-                j.score,
-                "Belum",
-                "",
-                j.job_id,
-            ]
-            for j in jobs
-        ]
+        rows = [[
+            j.found_date, j.title, j.company, j.location,
+            j.url, j.salary or "", j.work_type or "", j.posted_date or "",
+            j.score, "Belum", "", j.job_id,
+        ] for j in jobs]
         self.ws.append_rows(rows, value_input_option="USER_ENTERED")
 ```
 
@@ -631,7 +605,6 @@ Jalur Excel (`openpyxl`): buat workbook bila belum ada, tulis header, lalu `ws.a
 ```python
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from .utils import random_delay
-
 
 class Scraper:
     def __init__(self, cfg):
@@ -758,7 +731,6 @@ Contoh test:
 def test_senior_title_rejected(cfg):
     job = make_job(title="Senior Backend Developer", company="PT A")
     assert passes_prefilter(job, cfg.filters) is False
-
 
 def test_fresh_grad_scores_above_threshold(cfg):
     job = make_job(
