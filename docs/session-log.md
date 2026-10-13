@@ -79,13 +79,13 @@ ca95c11  chore: initial commit (project planning + gitignore)
 | M3 | `filters.py` (pra-filter + filter wajib + scoring) | ✅ | `79f8d0b` |
 | M4 | writers (Excel + Google Sheets + Null; `build_writer`) | ✅ | `58b0c6e` |
 | Fase 0 | investigasi JobStreet (selector terverifikasi + fixture) | ✅ | (commit docs) |
-| M6 | `parsers.py` (HTML → Job/JobDetail) + test fixture | ✅ | (commit m6) |
-| M5 | scraper Playwright | ⬜ **berikutnya** | — |
-| M7 | orkestrasi + CLI lengkap | ⬜ | — |
+| M6 | `parsers.py` (HTML → Job/JobDetail) + test fixture | ✅ | `a4967c2` |
+| M5 | scraper Playwright (`scraper.py`, HTML mentah) | ✅ | (commit m5) |
+| M7 | orkestrasi + CLI lengkap | ⬜ **berikutnya** | — |
 | M8 | hardening (retry, captcha, 0-hasil, pending backup) | ⬜ | — |
 | M9 | penjadwalan + README + CI opsional | ⬜ | — |
 
-**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (23 file) · pytest **115 passed** · coverage **99%** (parsers 100%) · bandit ✅
+**Quality gate saat ini:** ruff ✅ · `mypy --strict` ✅ (25 file) · pytest **122 passed** · coverage **99%** (parsers 100%) · bandit ✅
 
 ---
 
@@ -122,6 +122,7 @@ Scraping Loker/
 │   ├── storage.py              # SeenJobsDB
 │   ├── filters.py              # passes_prefilter, evaluate
 │   ├── parsers.py              # HTML → Job/JobDetail (selector dari Fase 0)
+│   ├── scraper.py              # Playwright: ambil HTML mentah (tanpa selector)
 │   ├── writers/
 │   │   ├── __init__.py         # build_writer(cfg.output, dry_run=)
 │   │   ├── base.py             # JobWriter Protocol, NullWriter, HEADERS, job_to_row
@@ -138,13 +139,15 @@ Scraping Loker/
     ├── test_filters.py
     ├── test_writers.py
     ├── test_parsers.py         # berbasis fixture Fase 0 (offline)
+    ├── test_scraper.py         # bagian murni scraper (URL builder) — offline
     └── fixtures/
         ├── search_page_01.html # halaman hasil (bersih; 30 kartu)
         ├── detail_01.html      # halaman detail (bersih)
         └── _raw/               # mentah, GITIGNORED (memuat token/key)
 
 scripts/
-└── capture_fase0.py            # utilitas: ambil + sanitasi fixture Fase 0
+├── capture_fase0.py            # utilitas: ambil + sanitasi fixture Fase 0
+└── smoke_scraper.py            # smoketest manual scraper → parser (headed)
 ```
 
 ---
@@ -190,6 +193,23 @@ Milestone tidak dianggap selesai bila salah satu gate merah.
 ### `models.py` (M1)
 - `Job`: `job_id, title, company, location, url, salary_text, salary_min_idr, work_type, posted_date, description, found_date, score`.
 - `EvalResult`: `passed, score, reason`.
+- `JobDetail` (M6): `title, company, location, work_type, salary_text, salary_min_idr, description` (semua opsional).
+
+### `parsers.py` (M6)
+- Selector JobStreet **hanya** ada di sini (acuan: `docs/fase0-hasil.md`).
+- `parse_search_page(html, *, base_url)` → `list[Job]` (field kartu; `job_id` dari `data-job-id`
+  dengan fallback `href`); kartu tanpa judul/href/ID → `StructureChangedError`.
+- `parse_detail_page(html)` → `JobDetail`; `parse_salary_min_idr(text)` → batas bawah gaji;
+  `apply_detail(job, detail)` → salinan `Job` dengan field detail.
+- `work_type` **hanya** ada di halaman detail (kartu tidak punya automation-nya).
+
+### `scraper.py` (M5)
+- Playwright **sinkron**; context manager (`Scraper(cfg.scraper) as source`).
+- `build_search_url(keyword, location, page)` (pola Fase 0); `iter_search_pages(kw, loc, max_pages)`
+  → HTML mentah per halaman + jeda acak; `fetch_detail_html(url)` → HTML detail + jeda.
+- **Tidak** tahu `Job`/selector; semua parsing di `parsers.py`.
+- Dikecualikan dari coverage; diuji via `tests/test_scraper.py` (bagian murni) +
+  `scripts/smoke_scraper.py` (headed).
 
 ### `utils.py` (M1)
 - `setup_logging(path)` (console + RotatingFileHandler, idempoten), `random_delay(min,max)`,
@@ -253,17 +273,21 @@ Metode yang **gagal** (jangan diulang):
   raw di `tests/fixtures/_raw/`, gitignored). Selector terverifikasi → `docs/fase0-hasil.md`.
 - **M6 — parser**: `parsers.py` (`parse_search_page`, `parse_detail_page`, `parse_salary_min_idr`,
   `apply_detail`) + `tests/test_parsers.py` (offline, fixture-driven). `JobDetail` ditambah ke `models.py`.
+- **M5 — scraper**: `scraper.py` (`build_search_url`, `Scraper` context manager, `iter_search_pages`,
+  `fetch_detail_html`) + `tests/test_scraper.py` (bagian murni) + `scripts/smoke_scraper.py`.
+  Smoketest headed: **30 kartu** + detail terbaca (work_type, deskripsi 3733 char).
+  Catatan: kontrak dipakai `iter_search_pages(...) -> Iterator[str]` (HTML per halaman), bukan
+  `iter_cards`: selector tetap **hanya** di `parsers.py`, scraper tidak tahu apa itu "kartu".
 - Dependensi baru: `beautifulsoup4` (runtime) + `types-beautifulsoup4` (dev) — di luar daftar spec §4,
   diperlukan untuk parse HTML offline.
 
-### Berikutnya: **M5 — scraper Playwright**
-`src/job_scraper/scraper.py`: `iter_cards`/`fetch_detail_html` (Playwright sinkron), pakai URL Fase 0:
-`/id/{keyword-slug}-jobs/in-{lokasi}?page=N` dan `/id/job/{id}`. **Wajib headed** bila Cloudflare muncul;
-jangan bypass. Logika parsing TIDAK di sini (ada di `parsers.py`).
+### Berikutnya: **M7 — orkestrasi + CLI**
+Rangkai `config → scraper → parsers → dedup → filters → writers` di `cli.run()` + flag
+`--dry-run/--limit/--headed/--reset-rejected`, `Stats`, ringkasan terminal (spec §8.1, EXECUTION-PLAN §6).
+Hentikan halaman hasil saat 0 kartu (diputuskan di orkestrasi, karena butuh hasil parse).
 
 ### Sisa milestone
-- **M5** scraper Playwright (ambil HTML mentah) + subsmoketest `--dry-run --limit 10`
-- **M7** orkestrasi `cli.py`/`main.py` + flag `--dry-run/--limit/--headed/--reset-rejected` + ringkasan
+- **M7** orkestrasi `cli.py`/`main.py` + flag lengkap + ringkasan
 - **M8** hardening: retry, deteksi selector hilang, CAPTCHA, backup `data/pending_*.json`, alert "0 hasil"
 - **M9** penjadwalan (Task Scheduler) + README + CI opsional
 
@@ -281,8 +305,8 @@ Kerjakan per milestone sesuai EXECUTION-PLAN.md, dan BERHENTI di akhir setiap mi
 untuk saya verifikasi. Ikuti standar python-pro: type hints lengkap, mypy --strict,
 ruff, pytest >=90% coverage, bandit; jangan ubah spec; jangan menebak selector JobStreet.
 
-Status: M0–M4 + Fase 0 + M6 selesai. Lanjutkan dari M5 (scraper Playwright; wajib headed bila
-Cloudflare muncul, jangan bypass). Selector resmi di docs/fase0-hasil.md — jangan menebak.
+Status: M0–M6 + Fase 0 selesai. Lanjutkan dari M7 (orkestrasi + CLI). Selector resmi di
+docs/fase0-hasil.md — jangan menebak. Scraper wajib headed bila Cloudflare muncul; jangan bypass.
 Jalankan quality gate di akhir dan commit dengan Conventional Commits.
 ```
 
