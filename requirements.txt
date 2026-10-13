@@ -5,3 +5,4 @@ pydantic>=2.0
 gspread>=6.0
 google-auth>=2.0
 openpyxl>=3.1
+beautifulsoup4>=4.12

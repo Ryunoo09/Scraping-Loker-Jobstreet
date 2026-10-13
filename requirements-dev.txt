@@ -8,3 +8,4 @@ mypy>=1.10
 bandit>=1.7
 hypothesis>=6.0
 types-pyyaml>=6.0
+types-beautifulsoup4>=4.12
