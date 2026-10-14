@@ -16,6 +16,7 @@ from job_scraper.exceptions import StructureChangedError
 from job_scraper.models import Job, JobDetail
 from job_scraper.parsers import (
     BASE_URL,
+    _extract_requirements,
     apply_detail,
     parse_detail_page,
     parse_salary_min_idr,
@@ -167,6 +168,38 @@ def test_parse_detail_page_fields(detail_html: str) -> None:
     assert detail.description is not None
     assert "Junior Programmer" in detail.description
     assert len(detail.description) > 500
+    assert detail.requirements is not None
+    assert "Logika Pemrograman" in detail.requirements or "algoritma" in detail.requirements
+
+
+@pytest.mark.parametrize(
+    ("header", "expected_items"),
+    [
+        ("Kualifikasi", ["harus bisa"]),
+        ("Persyaratan", ["minimal"]),
+        ("Keterampilan dan Kualifikasi", ["harus bisa", "Python"]),
+    ],
+)
+def test_extract_requirements_with_various_headers(header: str, expected_items: list[str]) -> None:
+    """Test _extract_requirements dengan berbagai variasi header seksi."""
+    from bs4 import BeautifulSoup
+
+    html = (
+        f"<div><p><strong>Deskripsi</strong></p>"
+        f"<p>Kami mencari kandidat terbaik</p>"
+        f"<p><strong>{header}</strong></p>"
+        f"<ul><li><p>harus bisa Python</p></li><li><p>minimal 2 tahun</p></li></ul>"
+        f"<p><strong>Manfaat</strong></p>"
+        f"<ul><li><p>Gaji kompetitif</p></li></ul>"
+        f"</div>"
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    element = soup.select_one("div")
+    result = _extract_requirements(element)
+
+    assert result is not None
+    for item in expected_items:
+        assert item in result
 
 
 def test_description_whitespace_is_normalized(detail_html: str) -> None:
@@ -197,6 +230,7 @@ def test_apply_detail_fills_description_work_type_and_salary(
     assert merged is not job
     assert merged.job_id == job.job_id
     assert merged.description == detail.description
+    assert merged.requirements == detail.requirements
     assert merged.work_type == "Full time"
     assert merged.salary_text == detail.salary_text
     assert merged.salary_min_idr == 4_000_000
@@ -210,6 +244,7 @@ def test_apply_detail_keeps_card_data_when_detail_empty(make_job: Callable[..., 
     assert merged.salary_text == "Rp 9.000.000 per month"
     assert merged.salary_min_idr == 9_000_000
     assert merged.description is None
+    assert merged.requirements is None
     assert merged.work_type is None
 
 

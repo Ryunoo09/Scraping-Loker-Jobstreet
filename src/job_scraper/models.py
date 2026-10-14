@@ -37,6 +37,7 @@ class Job(BaseModel):
     work_type: str | None = None
     posted_date: str | None = None
     description: str | None = None
+    requirements: str | None = None
     found_date: str = Field(default_factory=lambda: date.today().isoformat())
     score: int = 0
 
@@ -66,3 +67,4 @@ class JobDetail(BaseModel):
     salary_text: str | None = None
     salary_min_idr: int | None = None
     description: str | None = None
+    requirements: str | None = None

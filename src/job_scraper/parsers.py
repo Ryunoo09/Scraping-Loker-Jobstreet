@@ -133,6 +133,107 @@ def _description(element: Tag | None) -> str | None:
     return text or None
 
 
+#: Kata kunci header seksi kualifikasi/persyaratan (case-insensitive).
+_REQUIREMENT_HEADERS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"kualifikasi"),
+    re.compile(r"persyaratan"),
+    re.compile(r"requirements?"),
+    re.compile(r"keterampilan\s+(dan\s+)?(kualifikasi|syarat)"),
+    re.compile(r"syarat\s+(?!(utama|tanggung|pekerjaan|umum))?"),
+    re.compile(r"skills?\s+(and\s+)?(qualifications?|requirements?)"),
+)
+
+#: Kata kunci header yang menandai akhir seksi kualifikasi (apa pun setelah ini bukan kualifikasi).
+_END_SECTION_HEADERS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"manfaat"),
+    re.compile(r"benefits?"),
+    re.compile(r"tentang\s+(perusahaan|kami)"),
+    re.compile(r"about\s+(the\s+)?(company|us)"),
+    re.compile(r"cara\s+(melamar|mendaftar)"),
+    re.compile(r"how\s+to\s+(apply|join)"),
+    re.compile(r"informasi\s+(tambahan|lainnya)"),
+    re.compile(r"additional\s+information"),
+    re.compile(r"tanggung\s+jawab"),
+    re.compile(r"responsibilities?"),
+)
+
+
+def _extract_requirements(element: Tag | None) -> str | None:
+    """Ambil teks kualifikasi/persyaratan dari elemen deskripsi HTML.
+
+    Mencari seksi dengan header seperti "Kualifikasi", "Persyaratan",
+    "Keterampilan dan Kualifikasi", lalu mengumpulkan teks dari elemen
+    setelahnya (biasanya ``<ul>``) hingga header seksi lain ditemukan.
+
+    Args:
+        element: Elemen ``[data-automation="jobAdDetails"]``.
+
+    Returns:
+        Teks kualifikasi dalam satu baris, atau ``None`` bila tidak ditemukan.
+    """
+    if element is None:
+        return None
+
+    def _header_text(tag: Tag) -> str:
+        return " ".join(tag.get_text(" ", strip=True).split()).lower()
+
+    # Cari semua <strong>/<b> secara rekursif sebagai calon header seksi.
+    all_strong = element.find_all(["strong", "b"])
+
+    # Cari header kualifikasi pertama.
+    target: Tag | None = None
+    for tag in all_strong:
+        txt = _header_text(tag)
+        if any(p.search(txt) for p in _REQUIREMENT_HEADERS):
+            target = tag
+            break
+
+    if target is None:
+        return None
+
+    # Mulai dari parent target, kumpulkan elemen setelah header.
+    # Struktur tipikal:
+    #   <p><strong>Kualifikasi</strong></p>
+    #   <ul><li>...</li></ul>
+    #   <p><strong>Manfaat</strong></p>
+
+    parent = target.parent
+    if parent is None:
+        return None
+
+    # Cari parent container (biasanya <div> di dalam jobAdDetails).
+    container = parent.parent
+    if container is None:
+        return None
+
+    siblings = list(container.find_all(recursive=False))
+    try:
+        start_idx = siblings.index(parent)
+    except ValueError:
+        return None
+
+    end_idx: int | None = None
+    for sib in siblings[start_idx + 1 :]:
+        header = sib.find(["strong", "b"])
+        if header is not None:
+            txt = _header_text(header)
+            if any(p.search(txt) for p in _END_SECTION_HEADERS):
+                end_idx = siblings.index(sib)
+                break
+
+    parts: list[str] = []
+    for sib in siblings[start_idx + 1 :]:
+        if end_idx is not None and siblings.index(sib) >= end_idx:
+            break
+        text_content = _description(sib)
+        if text_content:
+            parts.append(text_content)
+
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 def parse_detail_page(html: str) -> JobDetail:
     """Ubah HTML halaman detail menjadi :class:`JobDetail`.
 
@@ -141,6 +242,7 @@ def parse_detail_page(html: str) -> JobDetail:
     """
     soup = BeautifulSoup(html, "html.parser")
     salary_text = _normalized_text(soup.select_one(_DETAIL_SALARY))
+    desc_element = soup.select_one(_DETAIL_DESCRIPTION)
     return JobDetail(
         title=_normalized_text(soup.select_one(_DETAIL_TITLE)),
         company=_normalized_text(soup.select_one(_DETAIL_COMPANY)),
@@ -148,7 +250,8 @@ def parse_detail_page(html: str) -> JobDetail:
         work_type=_normalized_text(soup.select_one(_DETAIL_WORK_TYPE)),
         salary_text=salary_text,
         salary_min_idr=parse_salary_min_idr(salary_text),
-        description=_description(soup.select_one(_DETAIL_DESCRIPTION)),
+        description=_description(desc_element),
+        requirements=_extract_requirements(desc_element),
     )
 
 
@@ -194,6 +297,8 @@ def apply_detail(job: Job, detail: JobDetail) -> Job:
     updates: dict[str, Any] = {}
     if detail.description is not None:
         updates["description"] = detail.description
+    if detail.requirements is not None:
+        updates["requirements"] = detail.requirements
     if detail.work_type is not None:
         updates["work_type"] = detail.work_type
     if detail.salary_text is not None:

@@ -1,7 +1,7 @@
 """Kontrak writer dan pemetaan ``Job`` ke baris spreadsheet (spec §7).
 
 Header kolom adalah **sumber tunggal** di sini supaya Excel dan Google Sheets
-selalu konsisten (12 kolom, urutan sesuai spec §7).
+selalu konsisten (14 kolom, urutan sesuai spec §7).
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ HEADERS: tuple[str, ...] = (
     "Skor",
     "Status Lamaran",
     "Catatan",
+    "Deskripsi",
+    "Kualifikasi",
     "Job ID",
 )
 
@@ -56,7 +58,7 @@ def job_to_row(job: Job) -> list[str | int]:
         job: Lowongan yang sudah tervalidasi.
 
     Returns:
-        Daftar 12 nilai, urut kolom A-L. Field opsional yang kosong menjadi ``""``.
+        Daftar 14 nilai, urut kolom A-N. Field opsional yang kosong menjadi ``""``.
     """
     return [
         job.found_date,
@@ -70,6 +72,8 @@ def job_to_row(job: Job) -> list[str | int]:
         job.score,
         DEFAULT_APPLICATION_STATUS,
         "",
+        job.description or "",
+        job.requirements or "",
         job.job_id,
     ]
 

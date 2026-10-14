@@ -106,7 +106,7 @@ def test_job_to_row_maps_all_columns(make_job: Callable[..., Job]) -> None:
 
     row = job_to_row(job)
 
-    assert len(row) == len(HEADERS) == 12
+    assert len(row) == len(HEADERS) == 14
     assert row[0] == job.found_date
     assert row[1] == "Junior Web Developer"
     assert row[2] == "PT Contoh"
@@ -118,7 +118,9 @@ def test_job_to_row_maps_all_columns(make_job: Callable[..., Job]) -> None:
     assert row[8] == 77
     assert row[9] == "Belum"
     assert row[10] == ""
-    assert row[11] == "42"
+    assert row[11] == ""  # description
+    assert row[12] == ""  # requirements
+    assert row[13] == "42"
 
 
 def test_job_to_row_uses_empty_strings_for_missing_optionals(
@@ -378,8 +380,8 @@ def test_sheets_append_writes_single_batch(
     rows, value_input_option = worksheet.appended[0]
     assert len(rows) == 2
     assert value_input_option == ValueInputOption.user_entered
-    assert rows[0][11] == "1"
-    assert rows[1][11] == "2"
+    assert rows[0][13] == "1"
+    assert rows[1][13] == "2"
 
 
 def test_sheets_append_empty_sequence_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
