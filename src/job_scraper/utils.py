@@ -6,11 +6,15 @@ import logging
 import random
 import time
 import unicodedata
+from datetime import UTC, datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _LOGGING_CONFIGURED = False
+
+#: Zona waktu WIB (UTC+7) untuk menampilkan waktu posting ke manusia.
+WIB = timezone(timedelta(hours=7), "WIB")
 
 
 def setup_logging(log_path: Path, level: int = logging.INFO) -> None:
@@ -59,6 +63,32 @@ def random_delay(min_sec: float, max_sec: float) -> float:
     delay = random.uniform(min_sec, max_sec)  # nosec B311
     time.sleep(delay)
     return delay
+
+
+def to_wib(value: str | None) -> str | None:
+    """Ubah stempel waktu ISO 8601 UTC menjadi teks WIB ``YYYY-MM-DD HH:MM``.
+
+    Dipakai untuk menampilkan ``Job.posted_at`` di spreadsheet sebagai tanggal+jam
+    yang bisa diurutkan (spec §7, kolom "Tanggal Posting").
+
+    Args:
+        value: Stempel waktu ISO 8601 (mis. ``2026-10-13T02:58:53.000Z``); nilai
+            kosong/``None`` dikembalikan apa adanya.
+
+    Returns:
+        Tanggal+jam WIB tanpa informasi zona (mis. ``2026-10-13 09:58``), atau
+        ``None`` bila ``value`` kosong atau tidak bisa diparse. Stempel waktu tanpa
+        zona dianggap UTC.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(WIB).strftime("%Y-%m-%d %H:%M")
 
 
 def normalize_text(text: str | None) -> str:

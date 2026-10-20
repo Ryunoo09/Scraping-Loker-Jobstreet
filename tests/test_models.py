@@ -12,7 +12,14 @@ def test_job_defaults(make_job: Callable[..., Job]) -> None:
     assert job.score == 0
     assert job.description is None
     assert job.salary_min_idr is None
+    assert job.posted_at is None
     assert job.found_date  # terisi otomatis
+
+
+def test_job_json_roundtrip_keeps_posted_at(make_job: Callable[..., Job]) -> None:
+    job = make_job(posted_at="2026-10-13T02:58:53.000Z")
+    restored = Job.model_validate_json(job.model_dump_json())
+    assert restored.posted_at == "2026-10-13T02:58:53.000Z"
 
 
 def test_job_strips_whitespace(make_job: Callable[..., Job]) -> None:

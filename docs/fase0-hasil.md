@@ -44,6 +44,30 @@ Tanggal: 2026-10-13 · Situs: `id.jobstreet.com` (JobStreet Indonesia, platform 
   diambil dari halaman **detail** (lihat §3) — diisi saat `fetch_detail`.
 - Total hasil ada di `[data-automation="totalJobsMessage"]` (mis. `68 pekerjaan`).
 
+## 2.1 Data server-state — waktu posting pasti
+
+Selain DOM, halaman hasil menyertakan satu blok data aplikasi:
+
+| Hal | Nilai |
+|---|---|
+| Lokasi | `<script data-automation="server-state">` (tepat **satu** blok) |
+| Variabel | `window.SEEK_REDUX_DATA` (bersama `window.SEEK_CONFIG`) |
+| Jalur data | `results.results.jobs` — daftar objek lowongan (30 pada sampel) |
+| Kunci per lowongan | `id` (sama dengan `data-job-id`), `listingDate`, `listingDateDisplay` |
+
+| Kunci JSON | Contoh | Arti |
+|---|---|---|
+| `id` | `"95227572"` | Job ID (kunci pencocokan ke kartu) |
+| `listingDate` | `"2026-10-13T02:58:53.000Z"` | **waktu posting pasti**, ISO 8601 UTC |
+| `listingDateDisplay` | `"12 jam yang lalu"` | teks relatif — sama dengan `jobListingDate` di kartu |
+
+- `listingDate` dipakai untuk mengisi `Job.posted_at` (`parsers.parse_listing_dates`),
+  karena `jobListingDate` di DOM hanya teks relatif (tidak bisa diurutkan/filter).
+- Halaman detail juga memuat `listedAt.dateTimeUtc` dengan nilai yang sama, tetapi
+  **tidak dipakai** — kartu sudah cukup dan lebih hemat.
+- Skrip fixture mengekstrak blok ini menjadi `tests/fixtures/listing_dates_01.html`
+  (hanya 3 kunci per lowongan, tanpa token/sesi) — lihat §6.
+
 ## 3. Selector — halaman detail
 
 | Field | Selector | Contoh isi |
@@ -79,12 +103,16 @@ Tanggal: 2026-10-13 · Situs: `id.jobstreet.com` (JobStreet Indonesia, platform 
 |---|---|---|
 | `tests/fixtures/search_page_01.html` | halaman hasil (30 kartu) | versi bersih (script/token dibuang) |
 | `tests/fixtures/detail_01.html` | halaman detail satu lowongan | versi bersih |
+| `tests/fixtures/listing_dates_01.html` | cuplikan server-state (`id`+`listingDate`) | versi bersih, dibuat `capture_fase0.py` |
 | `tests/fixtures/_raw/…` | versi mentah | **gitignored** (memuat token/key) |
 
 - Fixture **wajib** dipakai untuk test parser offline (`tests/test_parsers.py`, M6).
 - Versi mentah disimpan di `_raw/` hanya untuk rujukan lokal; jangan di-commit.
+- `listing_dates_01.html` bisa dibuat ulang **tanpa jaringan** dari fixture mentah:
+  `.\.venv\Scripts\python.exe scripts\capture_fase0.py --from-raw`
 
 ## 7. Yang masih perlu dikonfirmasi saat M6
 - Format gaji untuk rentang vs angka tunggal; apakah selalu `per month`.
-- Konsistensi `jobListingDate` (relatif) → sementara simpan apa adanya sebagai string.
+- ~~Konsistensi `jobListingDate` (relatif)~~ → **selesai**: waktu pasti diambil dari
+  `listingDate` server-state (§2.1); teks relatif tetap disimpan sebagai fallback.
 - Apakah `job-detail-work-type` selalu ada (bisa kosong pada sebagian lowongan).

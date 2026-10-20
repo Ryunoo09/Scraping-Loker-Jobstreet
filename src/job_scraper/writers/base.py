@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from ..models import Job
+from ..utils import to_wib
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ def job_to_row(job: Job) -> list[str | int]:
 
     Returns:
         Daftar 14 nilai, urut kolom A-N. Field opsional yang kosong menjadi ``""``.
+        Kolom "Tanggal Posting" memakai ``posted_at`` (WIB, ``YYYY-MM-DD HH:MM``);
+        bila tidak ada, jatuh ke ``posted_date`` (teks relatif dari kartu).
     """
     return [
         job.found_date,
@@ -68,7 +71,7 @@ def job_to_row(job: Job) -> list[str | int]:
         job.url,
         job.salary_text or "",
         job.work_type or "",
-        job.posted_date or "",
+        to_wib(job.posted_at) or job.posted_date or "",
         job.score,
         DEFAULT_APPLICATION_STATUS,
         "",

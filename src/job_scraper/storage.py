@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -11,6 +12,8 @@ from pathlib import Path
 from .exceptions import StorageError
 from .models import Job
 
+logger = logging.getLogger(__name__)
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_jobs (
     job_id      TEXT PRIMARY KEY,
@@ -19,9 +22,13 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
     url         TEXT,
     status      TEXT NOT NULL,
     score       INTEGER,
+    posted_at   TEXT,
     first_seen  TEXT NOT NULL
 );
 """
+
+#: Kolom yang ditambahkan setelah rilis awal; dipakai untuk migrasi DB lama (spec §10).
+_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (("posted_at", "TEXT"),)
 
 _MEMORY = ":memory:"
 
@@ -49,6 +56,7 @@ class SeenJobsDB:
         self._conn.row_factory = sqlite3.Row
         with self._guard():
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.execute("PRAGMA journal_mode=WAL")
 
     def __enter__(self) -> SeenJobsDB:
@@ -64,6 +72,15 @@ class SeenJobsDB:
             yield
         except sqlite3.Error as exc:
             raise StorageError(f"Operasi SQLite gagal: {exc}") from exc
+
+    def _migrate(self) -> None:
+        """Tambahkan kolom baru ke database lama tanpa menghapus data (idempoten)."""
+        columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(seen_jobs)")}
+        for column, column_type in _ADDED_COLUMNS:
+            if column in columns:
+                continue
+            self._conn.execute(f"ALTER TABLE seen_jobs ADD COLUMN {column} {column_type}")
+            logger.info("Migrasi DB: menambah kolom seen_jobs.%s", column)
 
     def has(self, job_id: str) -> bool:
         """Kembalikan ``True`` bila ``job_id`` sudah pernah dilihat."""
@@ -81,24 +98,44 @@ class SeenJobsDB:
             ).fetchone()
         return None if row is None else str(row["status"])
 
+    def get_posted_at(self, job_id: str) -> str | None:
+        """Kembalikan waktu posting tersimpan (ISO 8601 UTC) untuk ``job_id``."""
+        with self._guard():
+            row = self._conn.execute(
+                "SELECT posted_at FROM seen_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return None if row is None or row["posted_at"] is None else str(row["posted_at"])
+
     def mark(self, job: Job, status: str) -> None:
         """Catat lowongan beserta statusnya.
 
         ``first_seen`` hanya diisi saat pertama kali; pemanggilan berikutnya untuk
-        ``job_id`` yang sama hanya memperbarui ``status`` dan ``score``.
+        ``job_id`` yang sama hanya memperbarui ``status`` dan ``score``. Nilai
+        ``posted_at`` yang sudah tersimpan **tidak dihapus** oleh pemanggilan tanpa
+        ``posted_at`` (dipakai ``COALESCE``).
         """
         first_seen = datetime.now(UTC).isoformat()
         with self._guard(), self._conn:
             self._conn.execute(
                 """
                 INSERT INTO seen_jobs
-                    (job_id, title, company, url, status, score, first_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (job_id, title, company, url, status, score, posted_at, first_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
-                    status = excluded.status,
-                    score  = excluded.score
+                    status    = excluded.status,
+                    score     = excluded.score,
+                    posted_at = COALESCE(excluded.posted_at, seen_jobs.posted_at)
                 """,
-                (job.job_id, job.title, job.company, job.url, status, job.score, first_seen),
+                (
+                    job.job_id,
+                    job.title,
+                    job.company,
+                    job.url,
+                    status,
+                    job.score,
+                    job.posted_at,
+                    first_seen,
+                ),
             )
 
     def reset_rejected(self) -> int:

@@ -40,8 +40,28 @@ def test_normalize_text(raw: str | None, expected: str) -> None:
     assert utils.normalize_text(raw) == expected
 
 
-def test_setup_logging_writes_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-10-13T02:58:53.000Z", "2026-10-13 09:58"),  # UTC -> WIB (+7)
+        ("2026-10-13T18:30:00Z", "2026-10-14 01:30"),  # lewat tengah malam WIB
+        ("2026-10-13T09:58:00", "2026-10-13 16:58"),  # tanpa zona dianggap UTC
+        ("2026-10-13T02:58:53+07:00", "2026-10-13 02:58"),  # sudah WIB
+        (None, None),
+        ("", None),
+        ("bukan-tanggal", None),
+    ],
+)
+def test_to_wib(raw: str | None, expected: str | None) -> None:
+    assert utils.to_wib(raw) == expected
+
+
+def test_setup_logging_writes_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     log_path = tmp_path / "logs" / "scraper.log"
+    # Isolasi: test lain (mis. cli) mungkin sudah mengonfigurasi logging global.
+    for handler in list(logging.getLogger().handlers):
+        logging.getLogger().removeHandler(handler)
+    monkeypatch.setattr(utils, "_LOGGING_CONFIGURED", False)
 
     utils.setup_logging(log_path)
     logging.getLogger("test").info("halo dunia")

@@ -19,6 +19,7 @@ from job_scraper.parsers import (
     _extract_requirements,
     apply_detail,
     parse_detail_page,
+    parse_listing_dates,
     parse_salary_min_idr,
     parse_search_page,
 )
@@ -30,6 +31,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def search_html() -> str:
     """HTML halaman hasil pencarian (fixture Fase 0)."""
     return (FIXTURES / "search_page_01.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def listing_dates_html() -> str:
+    """HTML berisi server-state dengan ``listingDate`` (fixture Fase 0)."""
+    return (FIXTURES / "listing_dates_01.html").read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +66,7 @@ def test_first_card_fields(search_html: str) -> None:
     assert job.url.startswith(f"{BASE_URL}/id/job/95227572")
     assert job.salary_min_idr == 4_000_000
     assert job.posted_date == "12 jam yang lalu"
+    assert job.posted_at is None  # fixture bersih tanpa server-state
     assert job.description is None
     assert job.work_type is None
     assert job.found_date == date.today().isoformat()
@@ -150,6 +158,108 @@ def test_card_without_job_id_raises() -> None:
 
     with pytest.raises(StructureChangedError, match="Job ID"):
         parse_search_page(html)
+
+
+# --------------------------------------------------------------------------- #
+# parse_listing_dates — waktu posting pasti dari server-state
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_listing_dates_maps_job_id_to_timestamp(listing_dates_html: str) -> None:
+    dates = parse_listing_dates(listing_dates_html)
+
+    assert len(dates) == 30
+    assert dates["95227572"] == "2026-10-13T02:58:53.000Z"
+
+
+def test_parse_listing_dates_values_are_iso_utc(listing_dates_html: str) -> None:
+    dates = parse_listing_dates(listing_dates_html)
+
+    assert dates
+    assert all(value.endswith("Z") for value in dates.values())
+
+
+def test_parse_listing_dates_without_server_state_returns_empty() -> None:
+    assert parse_listing_dates("<html><body></body></html>") == {}
+
+
+def test_parse_listing_dates_without_redux_assignment_returns_empty() -> None:
+    html = '<script data-automation="server-state">window.OTHER = {};</script>'
+
+    assert parse_listing_dates(html) == {}
+
+
+def test_parse_listing_dates_with_broken_json_returns_empty() -> None:
+    html = '<script data-automation="server-state">window.SEEK_REDUX_DATA = {"a": };</script>'
+
+    assert parse_listing_dates(html) == {}
+
+
+def test_parse_listing_dates_with_unterminated_object_returns_empty() -> None:
+    html = '<script data-automation="server-state">window.SEEK_REDUX_DATA = {"a": 1;</script>'
+
+    assert parse_listing_dates(html) == {}
+
+
+def test_parse_listing_dates_ignores_non_numeric_ids() -> None:
+    html = (
+        '<script data-automation="server-state">'
+        'window.SEEK_REDUX_DATA = {"jobs": ['
+        '{"id": "abc", "listingDate": "2026-10-13T00:00:00.000Z"},'
+        '{"id": "12", "listingDate": "2026-10-13T00:00:00.000Z"}]};'
+        "</script>"
+    )
+
+    assert parse_listing_dates(html) == {"12": "2026-10-13T00:00:00.000Z"}
+
+
+def test_parse_listing_dates_without_object_returns_empty() -> None:
+    html = '<script data-automation="server-state">window.SEEK_REDUX_DATA = null;</script>'
+
+    assert parse_listing_dates(html) == {}
+
+
+def test_parse_listing_dates_handles_escaped_quotes() -> None:
+    html = (
+        '<script data-automation="server-state">'
+        'window.SEEK_REDUX_DATA = {"note": "tanda \\" di dalam",'
+        ' "jobs": [{"id": "7", "listingDate": "2026-10-13T00:00:00.000Z"}]};'
+        "</script>"
+    )
+
+    assert parse_listing_dates(html) == {"7": "2026-10-13T00:00:00.000Z"}
+
+
+def _server_state_script(listing_dates_html: str) -> str:
+    """Ambil tag ``<script>`` server-state dari fixture listing dates."""
+    end = listing_dates_html.index("</script>") + len("</script>")
+    return listing_dates_html[listing_dates_html.index("<script") : end]
+
+
+def test_parse_search_page_fills_posted_at_from_server_state(
+    search_html: str, listing_dates_html: str
+) -> None:
+    script = _server_state_script(listing_dates_html)
+    combined = search_html.replace("</head>", f"{script}</head>", 1)
+
+    job = parse_search_page(combined)[0]
+
+    assert job.job_id == "95227572"
+    assert job.posted_at == "2026-10-13T02:58:53.000Z"
+    assert job.posted_date == "12 jam yang lalu"  # teks relatif tetap ada
+
+
+def test_parse_search_page_card_absent_from_server_state_keeps_none(
+    listing_dates_html: str,
+) -> None:
+    # Kartu ada di DOM tetapi tidak ada di mapping server-state (id tidak cocok).
+    script = _server_state_script(listing_dates_html)
+    html = (
+        f'{script}<article data-automation="normalJob" data-job-id="999999999">'
+        '<a data-automation="jobTitle" href="/id/job/999999999">Tanpa Peta</a></article>'
+    )
+
+    assert parse_search_page(html)[0].posted_at is None
 
 
 # --------------------------------------------------------------------------- #

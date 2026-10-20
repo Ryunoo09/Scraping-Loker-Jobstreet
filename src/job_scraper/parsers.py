@@ -11,6 +11,7 @@ tampilan, cukup perbaiki file ini (dan perbarui fixture).
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -31,6 +32,17 @@ _COMPANY = '[data-automation="jobCompany"]'
 _LOCATION = '[data-automation="jobLocation"]'
 _SALARY = '[data-automation="jobSalary"]'
 _POSTED = '[data-automation="jobListingDate"]'
+
+# --- Data server-state: waktu posting pasti — Fase 0 §2.1 ---------------- #
+# Blok JSON di dalam <script data-automation="server-state"> memuat
+# window.SEEK_REDUX_DATA; tiap lowongan punya "id" + "listingDate" (ISO 8601 UTC).
+# Ini sumber **waktu posting pasti**, berbeda dari jobListingDate yang relatif.
+_SERVER_STATE = re.compile(
+    r'<script[^>]*data-automation="server-state"[^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+_REDUX_ASSIGN = re.compile(r"window\.SEEK_REDUX_DATA\s*=\s*")
+_DIGITS = re.compile(r"^\d+$")
 
 # --- Selector halaman detail — Fase 0 §3 -------------------------------- #
 _DETAIL_TITLE = '[data-automation="job-detail-title"]'
@@ -106,8 +118,98 @@ def _parse_card(card: Tag, base_url: str) -> Job:
     )
 
 
+def _balanced_object(text: str, start: int) -> str | None:
+    """Ambil literal objek JSON seimbang mulai ``{`` pertama pada/atau setelah ``start``.
+
+    Dipakai karena ``window.SEEK_REDUX_DATA = {...};`` diikuti pernyataan JavaScript
+    lain, jadi regex sederhana tidak aman (kurung kurawal bersarang & string).
+    """
+    index = text.find("{", start)
+    if index < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for position in range(index, len(text)):
+        char = text[position]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[index : position + 1]
+    return None
+
+
+def _collect_listing_dates(node: Any, found: dict[str, str]) -> None:
+    """Telusuri struktur JSON rekursif dan kumpulkan ``{job_id: listingDate}``.
+
+    Pencarian rekursif (bukan jalur kaku seperti ``results.results.jobs``) supaya
+    tetap berfungsi bila JobStreet mengubah kedalaman atau menambah pembungkus.
+    """
+    if isinstance(node, dict):
+        job_id = str(node.get("id", ""))
+        listed_at = node.get("listingDate")
+        if _DIGITS.match(job_id) and isinstance(listed_at, str) and listed_at:
+            found.setdefault(job_id, listed_at)
+        for value in node.values():
+            _collect_listing_dates(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_listing_dates(value, found)
+
+
+def parse_listing_dates(html: str) -> dict[str, str]:
+    """Petakan ``job_id -> listingDate`` (ISO 8601 UTC) dari HTML halaman hasil.
+
+    Membaca blok ``window.SEEK_REDUX_DATA`` pada
+    ``<script data-automation="server-state">`` (Fase 0 §2.1). Nilai ini adalah
+    **waktu posting pasti**; ``jobListingDate`` di kartu hanya teks relatif.
+
+    Args:
+        html: HTML lengkap halaman hasil pencarian.
+
+    Returns:
+        Pemetaan Job ID → stempel waktu ISO 8601 UTC. **Kosong** bila blok tidak
+        ditemukan atau JSON-nya rusak — pemanggil cukup memakai teks relatif.
+
+    Notes:
+        Sengaja tidak melempar error: struktur situs bisa berubah tanpa peringatan,
+        dan tanggal relatif tetap fallback yang valid.
+    """
+    script = _SERVER_STATE.search(html)
+    if script is None:
+        return {}
+    assignment = _REDUX_ASSIGN.search(script.group(1))
+    if assignment is None:
+        return {}
+    literal = _balanced_object(script.group(1), assignment.end())
+    if literal is None:
+        return {}
+    try:
+        data = json.loads(literal)
+    except json.JSONDecodeError:
+        return {}
+    found: dict[str, str] = {}
+    _collect_listing_dates(data, found)
+    return found
+
+
 def parse_search_page(html: str, *, base_url: str = BASE_URL) -> list[Job]:
     """Ubah HTML halaman hasil menjadi daftar :class:`Job` (field kartu saja).
+
+    Tanggal posting pasti (``posted_at``) diambil dari blok server-state via
+    :func:`parse_listing_dates`; bila tidak tersedia, ``posted_at`` tetap ``None``
+    dan ``posted_date`` (teks relatif dari kartu) dipakai sebagai fallback.
 
     Args:
         html: HTML lengkap halaman hasil pencarian.
@@ -122,7 +224,16 @@ def parse_search_page(html: str, *, base_url: str = BASE_URL) -> list[Job]:
             tidak ditemukan — indikasi struktur situs berubah.
     """
     soup = BeautifulSoup(html, "html.parser")
-    return [_parse_card(card, base_url) for card in soup.select(_CARD)]
+    listing_dates = parse_listing_dates(html)
+
+    jobs: list[Job] = []
+    for card in soup.select(_CARD):
+        job = _parse_card(card, base_url)
+        listed_at = listing_dates.get(job.job_id)
+        if listed_at is not None:
+            job = job.model_copy(update={"posted_at": listed_at})
+        jobs.append(job)
+    return jobs
 
 
 def _description(element: Tag | None) -> str | None:

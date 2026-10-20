@@ -322,7 +322,7 @@ Spreadsheet memiliki 12 kolom, urut sesuai spec §7:
 | E | Link Lowongan | Program (bisa diklik) |
 | F | Gaji | Program (atau kosong) |
 | G | Tipe Kerja | Program |
-| H | Tanggal Posting | Program (teks relatif) |
+| H | Tanggal Posting | Program (waktu WIB `YYYY-MM-DD HH:MM`; fallback teks relatif) |
 | I | Skor | Program (0-100) |
 | J | Status Lamaran | **Kamu** (dropdown: Belum / Sudah Dikirim / Wawancara / Ditolak / Diterima) |
 | K | Catatan | **Kamu** |
@@ -330,6 +330,13 @@ Spreadsheet memiliki 12 kolom, urut sesuai spec §7:
 
 > Program hanya **menambah baris baru** (append-only). Kolom J dan K milikmu
 > tidak akan pernah ditimpa.
+
+**Waktu posting (kolom H).** Program menyimpan **waktu posting pasti** dari data
+`window.SEEK_REDUX_DATA` di halaman hasil (bukan hanya teks relatif), lalu
+menampilkannya dalam **WIB** (`YYYY-MM-DD HH:MM`) supaya bisa diurutkan. Nilai
+ISO 8601 UTC-nya juga disimpan di `data/seen_jobs.db` (kolom `posted_at`). Bila
+data pasti tidak tersedia (mis. situs berubah), kolom H jatuh ke teks relatif
+seperti `12 jam yang lalu`.
 
 ---
 
@@ -355,7 +362,7 @@ src/job_scraper/
 
 tests/
 ├── conftest.py       # fixture bersama
-├── test_*.py         # 13 file test, 145 test
+├── test_*.py         # 9 file test, 175 test
 └── fixtures/         # HTML asli hasil Fase 0 (untuk test offline)
 ```
 
@@ -446,7 +453,7 @@ Dokumentasi lengkap: `scripts/schedule_windows.md`.
 Semua logika diuji **tanpa internet** menggunakan fixture HTML asli.
 
 ```powershell
-# Jalankan semua test (145 test)
+# Jalankan semua test (175 test)
 pytest
 
 # Dengan coverage
@@ -466,11 +473,11 @@ bandit -r src
 | models | 100% |
 | filters | 100% |
 | storage | 100% |
-| parsers | 100% |
+| parsers | 97% |
 | writers | 100% |
 | cli | 91% |
-| utils | 97% |
-| **Total** | **98%** |
+| utils | 100% |
+| **Total** | **97%** |
 
 Scraper (`scraper.py`) dikecualikan dari coverage karena butuh browser.
 
@@ -571,6 +578,7 @@ Scraping Loker/
 ├── docs/
 │   ├── fase0-investigasi.md        # panduan investigasi manual
 │   ├── fase0-hasil.md              # HASIL: selector terverifikasi
+│   ├── plan-tanggal-posting.md     # rencana waktu posting (posted_at)
 │   └── session-log.md              # catatan handoff sesi
 ├── src/job_scraper/                # package utama (~700 LOC)
 │   ├── __init__.py
@@ -580,10 +588,11 @@ Scraping Loker/
 │       ├── __init__.py, base.py, excel.py, sheets.py
 ├── tests/
 │   ├── conftest.py
-│   ├── test_*.py                   # 13 file, 145 test
+│   ├── test_*.py                   # 9 file, 175 test
 │   └── fixtures/
 │       ├── search_page_01.html     # 30 kartu lowongan
 │       ├── detail_01.html          # halaman detail
+│       ├── listing_dates_01.html   # cuplikan waktu posting (server-state)
 │       └── _raw/                   # gitignored
 ├── data/                           # runtime, gitignored
 │   ├── seen_jobs.db

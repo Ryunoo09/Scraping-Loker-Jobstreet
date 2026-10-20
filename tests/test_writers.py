@@ -133,6 +133,18 @@ def test_job_to_row_uses_empty_strings_for_missing_optionals(
     assert row[7] == ""
 
 
+def test_job_to_row_formats_posted_at_as_wib(make_job: Callable[..., Job]) -> None:
+    job = make_job(posted_at="2026-10-13T02:58:53.000Z", posted_date="12 jam yang lalu")
+
+    assert job_to_row(job)[7] == "2026-10-13 09:58"
+
+
+def test_job_to_row_falls_back_to_relative_posted_date(make_job: Callable[..., Job]) -> None:
+    job = make_job(posted_date="12 jam yang lalu")
+
+    assert job_to_row(job)[7] == "12 jam yang lalu"
+
+
 # --------------------------------------------------------------------------- #
 # ExcelWriter
 # --------------------------------------------------------------------------- #

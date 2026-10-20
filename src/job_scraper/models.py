@@ -19,7 +19,9 @@ class Job(BaseModel):
         salary_text: Teks gaji apa adanya, bila ada.
         salary_min_idr: Batas bawah gaji dalam Rupiah, bila bisa diparse.
         work_type: Full time / Magang / kontrak / dll.
-        posted_date: Tanggal posting (ISO date) bila tersedia.
+        posted_date: Tanggal posting (teks relatif JobStreet) bila tersedia.
+        posted_at: Waktu posting pasti (ISO 8601 UTC) dari data server-state,
+            mis. ``2026-10-13T02:58:53.000Z``; ``None`` bila tidak tersedia.
         description: Deskripsi lengkap dari halaman detail.
         found_date: Tanggal lowongan ditemukan (ISO date).
         score: Skor kecocokan 0-100 dari tahap scoring.
@@ -36,6 +38,7 @@ class Job(BaseModel):
     salary_min_idr: int | None = None
     work_type: str | None = None
     posted_date: str | None = None
+    posted_at: str | None = None
     description: str | None = None
     requirements: str | None = None
     found_date: str = Field(default_factory=lambda: date.today().isoformat())
