@@ -1,0 +1,70 @@
+# ============================================================
+# LinkedIn Scraper — CONTOH konfigurasi (mandiri, guest/tanpa login)
+# Salin file ini menjadi config_linkedin.yaml lalu sesuaikan.
+# Semua nilai di bawah bersifat ilustrasi.
+# ============================================================
+
+# ------------------------------------------------------------
+# BAGIAN 1: PENCARIAN
+# ------------------------------------------------------------
+search:
+  keywords:
+    - "IT Support"
+    - "Junior Web Developer"
+  location: "Indonesia"          # teks bebas
+  posted_within_days: 7          # -> f_TPR=r604800; null = semua
+  work_types: []                 # kode f_JT, mis. ["F"] full-time
+  experience_levels: []          # kode f_E, mis. [1, 2]
+  max_pages_per_query: 2         # 10 kartu per halaman; guest cepat kena limit
+  fetch_detail: true             # ambil deskripsi lengkap (best-effort)
+
+# ------------------------------------------------------------
+# BAGIAN 2: FILTER
+# ------------------------------------------------------------
+filters:
+  exclude_title_keywords:
+    - "senior"
+    - "lead"
+    - "manager"
+  exclude_description_keywords:
+    - "minimal 3 tahun"
+    - "at least 3 years"
+  exclude_companies: []
+
+# ------------------------------------------------------------
+# BAGIAN 3: SKOR KECOCOKAN (0-100)
+# ------------------------------------------------------------
+scoring:
+  min_score: 40
+  title_keywords:
+    "developer": 25
+    "support": 25
+    "junior": 15
+  description_keywords:
+    "fresh graduate": 20
+    "python": 10
+  location_bonus:
+    "Jakarta": 10
+
+# ------------------------------------------------------------
+# BAGIAN 4: OUTPUT (TERPISAH dari JobStreet)
+# ------------------------------------------------------------
+output:
+  type: "excel"
+  excel:
+    file_path: "data/linkedin_jobs.xlsx"
+  # Isi bagian ini hanya bila type: "google_sheets"
+  # google_sheets:
+  #   spreadsheet_id: "ISI_ID_SPREADSHEET_TERPISAH"
+  #   worksheet_name: "LinkedIn"
+  #   credentials_file: "credentials/service_account.json"
+
+# ------------------------------------------------------------
+# BAGIAN 5: PERILAKU SCRAPER (kesopanan & stabilitas)
+# ------------------------------------------------------------
+scraper:
+  delay_min_sec: 6               # jeda acak antar permintaan
+  delay_max_sec: 15
+  page_timeout_sec: 30
+  max_retries: 3                 # retry saat 429/timeout
+  max_jobs_per_run: 100
