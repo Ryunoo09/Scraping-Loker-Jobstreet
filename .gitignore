@@ -34,6 +34,13 @@ tests/hasil fase 0/
 tests/fixtures/_raw/
 
 # ============================================================
+# LinkedIn (fitur mandiri) — config pribadi & fixture mentah
+# ============================================================
+# config_linkedin.yaml berisi kriteria pribadi; fixture mentah memuat ID pelacakan.
+config_linkedin.yaml
+tests/fixtures/linkedin/_raw/
+
+# ============================================================
 # Python
 # ============================================================
 __pycache__/
