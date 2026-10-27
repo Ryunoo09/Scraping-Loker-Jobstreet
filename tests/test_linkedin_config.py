@@ -81,3 +81,34 @@ def test_google_sheets_accepts_real_id(tmp_path: Path) -> None:
     cfg = load_config(_write(tmp_path, text))
     assert cfg.output.google_sheets is not None
     assert cfg.output.google_sheets.spreadsheet_id == "abc123"
+
+
+def test_empty_location_is_rejected(tmp_path: Path) -> None:
+    text = _BASE.replace('location: "Indonesia"', 'location: ""')
+    with pytest.raises(ConfigError, match="minimal satu nilai"):
+        load_config(_write(tmp_path, text))
+
+
+def test_yaml_syntax_error_is_reported(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="YAML tidak valid"):
+        load_config(_write(tmp_path, "search: ["))
+
+
+def test_non_mapping_config_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="mapping YAML"):
+        load_config(_write(tmp_path, "- a\n- b\n"))
+
+
+def test_excel_type_requires_excel_section(tmp_path: Path) -> None:
+    text = _BASE.replace('  excel:\n    file_path: "data/linkedin_jobs.xlsx"\n', "")
+    with pytest.raises(ConfigError, match=r"output\.excel"):
+        load_config(_write(tmp_path, text))
+
+
+def test_google_sheets_without_section_is_rejected(tmp_path: Path) -> None:
+    text = _BASE.replace(
+        'output:\n  type: "excel"\n  excel:\n    file_path: "data/linkedin_jobs.xlsx"',
+        'output:\n  type: "google_sheets"',
+    )
+    with pytest.raises(ConfigError, match=r"output\.google_sheets"):
+        load_config(_write(tmp_path, text))

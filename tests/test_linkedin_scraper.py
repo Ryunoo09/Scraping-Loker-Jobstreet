@@ -67,6 +67,44 @@ def test_build_detail_url() -> None:
     )
 
 
+def test_search_page_html_builds_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_get(self: HttpSource, url: str) -> str:
+        captured["url"] = url
+        return "<html/>"
+
+    monkeypatch.setattr(HttpSource, "_get", fake_get)
+    monkeypatch.setattr(scraper, "random_delay", lambda *_: 0.0)
+
+    search = SearchConfig(
+        keywords=["Dev"],
+        location="Indonesia",
+        posted_within_days=7,
+        work_types=["F"],
+    )
+    source = HttpSource(CONFIG, search)
+    assert source.search_page_html("Dev", 2) == "<html/>"
+    assert "start=10" in captured["url"]
+    assert "f_TPR=r604800" in captured["url"]
+    assert "f_JT=F" in captured["url"]
+
+
+def test_fetch_detail_html_builds_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_get(self: HttpSource, url: str) -> str:
+        captured["url"] = url
+        return "<html/>"
+
+    monkeypatch.setattr(HttpSource, "_get", fake_get)
+    monkeypatch.setattr(scraper, "random_delay", lambda *_: 0.0)
+
+    source = HttpSource(CONFIG, SEARCH)
+    assert source.fetch_detail_html("123") == "<html/>"
+    assert captured["url"].endswith("/jobPosting/123")
+
+
 def _raise_429(*args: Any, **kwargs: Any) -> _FakeResponse:
     raise urllib.error.HTTPError("http://x", 429, "Too Many", Message(), None)
 

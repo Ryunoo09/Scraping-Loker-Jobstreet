@@ -72,9 +72,7 @@ class SeenJobsDB:
         for column, column_type in _ADDED_COLUMNS:
             if column in columns:
                 continue
-            self._conn.execute(
-                f"ALTER TABLE linkedin_seen_jobs ADD COLUMN {column} {column_type}"
-            )
+            self._conn.execute(f"ALTER TABLE linkedin_seen_jobs ADD COLUMN {column} {column_type}")
             logger.info("Migrasi DB: menambah kolom linkedin_seen_jobs.%s", column)
 
     def has(self, job_id: str) -> bool:
