@@ -1,10 +1,15 @@
-# Job Scraper — JobStreet → Spreadsheet
+# Job Scraper — JobStreet & LinkedIn → Spreadsheet
 
 Program otomatis yang mengambil lowongan kerja dari **JobStreet Indonesia**
-(`id.jobstreet.com`), menyaring sesuai kriteria pribadi, lalu menyimpan yang lolos
-ke spreadsheet (Excel atau Google Sheets). Kamu tinggal melamar secara manual.
+(`id.jobstreet.com`) dan **LinkedIn** (mode guest/tanpa login), menyaring sesuai
+kriteria pribadi, lalu menyimpan yang lolos ke spreadsheet (Excel atau Google
+Sheets). Kamu tinggal melamar secara manual.
 
 > **Lamaran tetap manual.** Program hanya mengumpulkan dan menyaring data.
+
+> **Dua scraper terpisah.** JobStreet (`main.py`) dan LinkedIn (`linkedin_main.py`)
+> punya config, database, output, dan log sendiri. Lihat
+> [LinkedIn Scraper](#linkedin-scraper-fitur-tambahan).
 
 ---
 
@@ -16,6 +21,7 @@ ke spreadsheet (Excel atau Google Sheets). Kamu tinggal melamar secara manual.
 - [Konfigurasi](#konfigurasi)
 - [Penggunaan](#penggunaan)
 - [Hasil Output](#hasil-output)
+- [LinkedIn Scraper (Fitur Tambahan)](#linkedin-scraper-fitur-tambahan)
 - [Arsitektur & Modul](#arsitektur--modul)
 - [Catatan Investigasi Fase 0](#catatan-investigasi-fase-0)
 - [Cloudflare Turnstile](#cloudflare-turnstile)
@@ -69,8 +75,11 @@ Semua langkah bisa diuji tanpa internet berkat fixture HTML di `tests/fixtures/`
 |---|---|---|
 | Python | 3.12+ | 3.11 mungkin juga berfungsi tetapi belum diuji |
 | OS | Windows 10/11 | Path absolut untuk penjadwalan |
-| Browser | Chromium | Dipasang via `playwright install chromium` |
+| Browser | Chromium | **Hanya untuk JobStreet** (`playwright install chromium`) |
 | Internet | Ya | Hanya saat scraping; testing offline |
+
+> LinkedIn berjalan tanpa browser — cukup `urllib` bawaan Python. Jadi kalau kamu
+> hanya memakai LinkedIn, langkah `playwright install` boleh dilewati.
 
 ---
 
@@ -138,6 +147,17 @@ Config valid: config.yaml
 
 Kalau ada error, perbaiki sesuai pesan yang ditampilkan (mis. salah ketik key,
 `spreadsheet_id` masih placeholder, `min_score` di luar 0-100).
+
+### 8. (Opsional) Siapkan LinkedIn
+
+LinkedIn memakai config sendiri dan tidak butuh Chromium.
+
+```powershell
+copy config_linkedin.example.yaml config_linkedin.yaml
+python linkedin_main.py --check-config
+```
+
+Detail lengkap ada di [LinkedIn Scraper](#linkedin-scraper-fitur-tambahan).
 
 ---
 
@@ -340,6 +360,70 @@ seperti `12 jam yang lalu`.
 
 ---
 
+## LinkedIn Scraper (Fitur Tambahan)
+
+Fitur **mandiri**: tidak mengubah apa pun di scraper JobStreet. Config, database,
+output, dan log terpisah total.
+
+### Cara menjalankan
+
+```powershell
+# 1) salin & edit config
+copy config_linkedin.example.yaml config_linkedin.yaml
+
+# 2) validasi
+python linkedin_main.py --check-config
+
+# 3) coba tanpa menulis apa pun
+python linkedin_main.py --dry-run --limit 3
+
+# 4) jalankan sungguhan
+python linkedin_main.py --limit 20
+
+# 5) nilai ulang lowongan yang dulu ditolak
+python linkedin_main.py --reset-rejected
+```
+
+### Opsi CLI LinkedIn
+
+| Opsi | Arti |
+|---|---|
+| `--config PATH` | path ke `config_linkedin.yaml` |
+| `--check-config` | validasi config lalu keluar |
+| `--dry-run` | simulasi tanpa menulis DB/spreadsheet |
+| `--limit N` | batasi jumlah lowongan yang diproses |
+| `--reset-rejected` | hapus catatan lowongan yang ditolak |
+
+### Output LinkedIn (terpisah)
+
+| Item | Lokasi |
+|---|---|
+| Spreadsheet | `data/linkedin_jobs.xlsx` |
+| Database dedup | `data/linkedin_seen.db` |
+| Log | `logs/linkedin_scraper.log` |
+| Sheet | 15 kolom (A–O), termasuk "Detail Lengkap?" |
+
+Kolom "Status Lamaran" dan "Catatan" tetap milikmu — penulisan append-only.
+
+### Batasan mode guest
+
+- Tanpa login → **10 kartu per halaman**, hasil terbatas.
+- **Gaji dan tipe kerja tidak tersedia** (kolom F/G kosong).
+- Tanggal posting hanya tanggal (`YYYY-MM-DD`), bukan jam.
+- Sering kena **HTTP 429**; scraper retry otomatis dengan backoff.
+- Deskripsi detail bersifat best-effort; kolom "Detail Lengkap?" menandainya.
+
+### Dokumentasi terkait
+
+- [`docs/linkedin-usage.md`](docs/linkedin-usage.md) — panduan pemakaian lengkap.
+- [`docs/fase0-linkedin.md`](docs/fase0-linkedin.md) — selector & URL terverifikasi.
+- [`docs/planning-linkedin.md`](docs/planning-linkedin.md) — rencana & keputusan desain.
+
+> Scraping LinkedIn melanggar Ketentuan Layanan mereka. Gunakan untuk data pribadi
+> skala kecil, tanpa mencoba menembus proteksi bot.
+
+---
+
 ## Arsitektur & Modul
 
 ```text
@@ -453,11 +537,14 @@ Dokumentasi lengkap: `scripts/schedule_windows.md`.
 Semua logika diuji **tanpa internet** menggunakan fixture HTML asli.
 
 ```powershell
-# Jalankan semua test (175 test)
+# Jalankan semua test
 pytest
 
-# Dengan coverage
+# Coverage JobStreet
 pytest --cov=job_scraper --cov-report=term-missing
+
+# Coverage LinkedIn (gate 90%)
+pytest tests -k linkedin --cov=linkedin_scraper --cov-report=term-missing --cov-fail-under=90
 
 # Lint & type
 ruff check .
@@ -477,9 +564,11 @@ bandit -r src
 | writers | 100% |
 | cli | 91% |
 | utils | 100% |
-| **Total** | **97%** |
+| **JobStreet total** | **97%** |
+| **LinkedIn total** | **96%** |
 
-Scraper (`scraper.py`) dikecualikan dari coverage karena butuh browser.
+Scraper JobStreet (`scraper.py`) dikecualikan dari coverage karena butuh browser.
+Jalur jaringan LinkedIn di-mock (tanpa internet).
 
 ---
 
@@ -546,12 +635,14 @@ File berikut **jangan pernah di-commit** ke GitHub:
 
 | File | Alasan |
 |---|---|
-| `config.yaml` | Berisi kriteria pribadi (keyword, gaji, dll) |
+| `config.yaml` | Berisi kriteria pribadi JobStreet (keyword, gaji, dll) |
+| `config_linkedin.yaml` | Berisi kriteria pribadi LinkedIn |
 | `credentials/` | Kunci service account Google Cloud |
 | `data/` | Database SQLite, file Excel, cadangan pending |
 | `logs/` | Log runtime |
 | `tests/hasil fase 0/` | Laporan mentah memuat token browser (`key_live_`, `loginId`) |
 | `tests/fixtures/_raw/` | Fixture mentah memuat data sesi browser |
+| `tests/fixtures/linkedin/_raw/` | Fixture mentah memuat ID pelacakan & token CSRF |
 
 Semua file di atas sudah masuk `.gitignore`.
 
@@ -561,9 +652,12 @@ Semua file di atas sudah masuk `.gitignore`.
 
 ```
 Scraping Loker/
-├── main.py                         # entrypoint
+├── main.py                         # entrypoint JobStreet
+├── linkedin_main.py                # entrypoint LinkedIn
 ├── config.yaml                     # KAMU (gitignored)
-├── config.example.yaml             # contoh aman untuk di-commit
+├── config.example.yaml             # contoh JobStreet
+├── config_linkedin.yaml            # KAMU (gitignored)
+├── config_linkedin.example.yaml    # contoh LinkedIn
 ├── requirements.txt                # dependensi runtime
 ├── requirements-dev.txt            # + dev
 ├── pyproject.toml                  # tooling config
@@ -571,34 +665,50 @@ Scraping Loker/
 ├── .gitattributes
 ├── README.md                       # file ini
 ├── scripts/
-│   ├── capture_fase0.py            # ambil fixture Fase 0 (Playwright headed)
-│   ├── smoke_scraper.py            # smoketest scraper → parser
+│   ├── capture_fase0.py            # fixture JobStreet (Playwright headed)
+│   ├── smoke_scraper.py            # smoketest JobStreet
+│   ├── capture_linkedin.py         # fixture LinkedIn (HTTP, tanpa browser)
+│   ├── smoke_linkedin.py           # smoketest LinkedIn
 │   ├── run.bat                     # pemanggil untuk Task Scheduler
 │   └── schedule_windows.md         # panduan penjadwalan
 ├── docs/
-│   ├── fase0-investigasi.md        # panduan investigasi manual
-│   ├── fase0-hasil.md              # HASIL: selector terverifikasi
+│   ├── fase0-investigasi.md        # panduan investigasi JobStreet
+│   ├── fase0-hasil.md              # HASIL: selector JobStreet terverifikasi
+│   ├── fase0-linkedin.md           # HASIL: selector LinkedIn terverifikasi
+│   ├── planning-linkedin.md        # rencana fitur LinkedIn
+│   ├── linkedin-usage.md           # cara pakai LinkedIn
 │   ├── plan-tanggal-posting.md     # rencana waktu posting (posted_at)
 │   └── session-log.md              # catatan handoff sesi
-├── src/job_scraper/                # package utama (~700 LOC)
+├── src/job_scraper/                # package JobStreet (~700 LOC)
 │   ├── __init__.py
 │   ├── cli.py, config.py, exceptions.py, filters.py
 │   ├── models.py, parsers.py, scraper.py, storage.py, utils.py
 │   └── writers/
 │       ├── __init__.py, base.py, excel.py, sheets.py
+├── src/linkedin_scraper/           # package LinkedIn (mandiri)
+│   ├── __init__.py, cli.py, config.py, exceptions.py
+│   ├── models.py, parsers.py, scraper.py, filters.py
+│   ├── storage.py, utils.py
+│   └── writers/
+│       ├── __init__.py, base.py, excel.py, sheets.py
 ├── tests/
 │   ├── conftest.py
-│   ├── test_*.py                   # 9 file, 175 test
+│   ├── test_*.py                   # test JobStreet
+│   ├── test_linkedin_*.py          # test LinkedIn
 │   └── fixtures/
-│       ├── search_page_01.html     # 30 kartu lowongan
-│       ├── detail_01.html          # halaman detail
+│       ├── search_page_01.html     # 30 kartu JobStreet
+│       ├── detail_01.html          # halaman detail JobStreet
 │       ├── listing_dates_01.html   # cuplikan waktu posting (server-state)
+│       ├── linkedin/               # fixture LinkedIn (kartu & detail)
 │       └── _raw/                   # gitignored
 ├── data/                           # runtime, gitignored
 │   ├── seen_jobs.db
-│   └── jobs_local.xlsx
+│   ├── jobs_local.xlsx
+│   ├── linkedin_seen.db
+│   └── linkedin_jobs.xlsx
 └── logs/                           # runtime, gitignored
-    └── scraper.log
+    ├── scraper.log
+    └── linkedin_scraper.log
 ```
 
 ---
@@ -607,5 +717,6 @@ Scraping Loker/
 
 Hanya untuk pemakaian pribadi. Tidak untuk didistribusikan atau dijual.
 
-**Sumber data:** JobStreet Indonesia (bagian dari SEEK). Seluruh hak cipta data
-milik JobStreet/SEEK.
+**Sumber data:** JobStreet Indonesia (bagian dari SEEK) dan LinkedIn. Seluruh hak
+cipta data milik masing-masing pemiliknya. Scraping LinkedIn melanggar Ketentuan
+Layanan mereka — gunakan dengan risiko sendiri.
