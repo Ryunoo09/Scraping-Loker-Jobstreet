@@ -142,10 +142,15 @@ def parse_detail_page(html: str) -> JobDetail:
 
 
 def apply_detail(job: JobLinkedIn, detail: JobDetail) -> JobLinkedIn:
-    """Gabungkan :class:`JobDetail` ke :class:`JobLinkedIn` (kembalikan salinan)."""
+    """Gabungkan :class:`JobDetail` ke :class:`JobLinkedIn` (kembalikan salinan).
+
+    Detail guest sering terpotong/gagal. Field yang kosong **tidak** menimpa data
+    kartu, dan ``detail_complete`` hanya ``True`` bila deskripsi berhasil diambil.
+    """
     updates: dict[str, Any] = {}
     if detail.description is not None:
         updates["description"] = detail.description
+        updates["detail_complete"] = True
     if detail.requirements is not None:
         updates["requirements"] = detail.requirements
     return job.model_copy(update=updates)

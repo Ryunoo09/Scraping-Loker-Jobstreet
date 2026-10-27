@@ -104,3 +104,27 @@ def test_apply_detail_merges_description() -> None:
     assert merged.description == "desc"
     assert merged.requirements == "req"
     assert merged.title == job.title
+
+
+def test_apply_detail_marks_complete_when_description_present() -> None:
+    job = parse_search_page(CARDS_01)[0]
+    assert job.detail_complete is False
+    merged = apply_detail(job, JobDetail(description="desc"))
+    assert merged.detail_complete is True
+
+
+def test_apply_detail_empty_keeps_card_data() -> None:
+    job = parse_search_page(CARDS_01)[0]
+    merged = apply_detail(job, JobDetail())
+    assert merged.description is None
+    assert merged.requirements is None
+    assert merged.detail_complete is False
+    assert merged.job_id == job.job_id
+    assert merged.title == job.title
+    assert merged.company == job.company
+
+
+def test_apply_detail_partial_does_not_wipe_existing_requirements() -> None:
+    job = parse_search_page(CARDS_01)[0].model_copy(update={"requirements": "lama"})
+    merged = apply_detail(job, JobDetail(description="desc"))
+    assert merged.requirements == "lama"
