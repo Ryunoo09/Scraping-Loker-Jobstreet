@@ -84,7 +84,7 @@ Penulisan bersifat **append-only**.
 
 ```powershell
 # hanya test LinkedIn + coverage
-.\\.venv\\Scripts\\pytest.exe tests -k linkedin --cov=linkedin_scraper --cov-report=term-missing
+.\\.venv\\Scripts\\pytest.exe tests -k linkedin --cov=linkedin_scraper --cov-report=term-missing --cov-fail-under=90
 
 # lint & type & security
 .\\.venv\\Scripts\\ruff.exe check .

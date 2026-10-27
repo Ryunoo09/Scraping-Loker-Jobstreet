@@ -28,3 +28,6 @@ jobs:
 
       - name: pytest (offline, fixtures)
         run: python -m pytest
+
+      - name: coverage LinkedIn (gate 90%)
+        run: python -m pytest tests -k linkedin --cov=linkedin_scraper --cov-report=term-missing --cov-fail-under=90
