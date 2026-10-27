@@ -9,6 +9,7 @@ import pytest
 from gspread.exceptions import GSpreadException
 from openpyxl import load_workbook
 
+import linkedin_scraper.writers as writers_pkg
 from linkedin_scraper.config import ExcelConfig, GoogleSheetsConfig, OutputConfig
 from linkedin_scraper.exceptions import WriterError
 from linkedin_scraper.models import JobLinkedIn
@@ -100,6 +101,7 @@ class _FakeWorksheet:
     def __init__(self) -> None:
         self.header: list[str] = []
         self.rows: list[list[str | int]] = []
+        self.last_value_input_option = ""
 
     def row_values(self, row: int) -> list[str]:
         return list(self.header)
@@ -108,6 +110,7 @@ class _FakeWorksheet:
         self.header = list(values)
 
     def append_rows(self, rows: list[list[str | int]], value_input_option: str = "") -> None:
+        self.last_value_input_option = value_input_option
         self.rows.extend(rows)
 
 
@@ -138,6 +141,7 @@ def test_sheets_writer_writes_header_and_rows(monkeypatch: pytest.MonkeyPatch) -
     assert worksheet.header == list(HEADERS)
     assert len(worksheet.rows) == 1
     assert worksheet.rows[0][1] == "Laravel Programmer"
+    assert worksheet.last_value_input_option == "RAW"
 
 
 def test_sheets_writer_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,3 +151,76 @@ def test_sheets_writer_connection_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(gspread, "service_account", boom)
     with pytest.raises(WriterError, match="Gagal terhubung"):
         GoogleSheetsWriter(GoogleSheetsConfig(spreadsheet_id="abc"))
+
+
+def test_excel_writer_forces_text_for_formula_like_values(tmp_path: Path) -> None:
+    path = tmp_path / "inj.xlsx"
+    ExcelWriter(path).append([_job(title='=HYPERLINK("http://evil","klik")')])
+
+    cell = load_workbook(path).active.cell(row=2, column=2)
+    assert cell.data_type == "s"
+    assert cell.value.startswith("=")
+
+
+def test_sheets_header_mismatch_is_not_overwritten(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worksheet = _FakeWorksheet()
+    worksheet.header = ["Header Lama"]
+    monkeypatch.setattr(gspread, "service_account", lambda filename: _FakeClient(worksheet))
+
+    GoogleSheetsWriter(GoogleSheetsConfig(spreadsheet_id="abc")).ensure_header()
+
+    assert worksheet.header == ["Header Lama"]
+
+
+class _BrokenWorksheet(_FakeWorksheet):
+    def append_rows(self, rows: list[list[str | int]], value_input_option: str = "") -> None:
+        raise GSpreadException("quota exceeded")
+
+
+def test_sheets_append_error_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    worksheet = _BrokenWorksheet()
+    monkeypatch.setattr(gspread, "service_account", lambda filename: _FakeClient(worksheet))
+
+    writer = GoogleSheetsWriter(GoogleSheetsConfig(spreadsheet_id="abc"))
+    with pytest.raises(WriterError, match="Gagal menulis"):
+        writer.append([_job()])
+
+
+def test_excel_writer_rejects_corrupt_file(tmp_path: Path) -> None:
+    path = tmp_path / "bad.xlsx"
+    path.write_text("not a zip", encoding="utf-8")
+    with pytest.raises(WriterError, match="tidak bisa dibaca"):
+        ExcelWriter(path).ensure_header()
+
+
+def test_build_writer_google_sheets_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSheetsWriter:
+        def __init__(self, cfg: GoogleSheetsConfig) -> None:
+            self.cfg = cfg
+
+        def ensure_header(self) -> None:
+            return None
+
+    monkeypatch.setattr(writers_pkg, "GoogleSheetsWriter", _FakeSheetsWriter)
+    cfg = OutputConfig(type="google_sheets", google_sheets=GoogleSheetsConfig(spreadsheet_id="abc"))
+    assert isinstance(build_writer(cfg), _FakeSheetsWriter)
+
+
+def test_build_writer_missing_excel_section() -> None:
+    cfg = OutputConfig.model_construct(type="excel", excel=None, google_sheets=None)
+    with pytest.raises(WriterError, match=r"output\.excel"):
+        build_writer(cfg)
+
+
+def test_build_writer_missing_sheets_section() -> None:
+    cfg = OutputConfig.model_construct(type="google_sheets", excel=None, google_sheets=None)
+    with pytest.raises(WriterError, match=r"output\.google_sheets"):
+        build_writer(cfg)
+
+
+def test_null_writer_is_noop() -> None:
+    writer = NullWriter()
+    writer.ensure_header()
+    writer.append([_job()])

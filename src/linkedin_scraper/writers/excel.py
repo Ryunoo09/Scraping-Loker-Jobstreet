@@ -102,9 +102,15 @@ def _next_row(worksheet: Worksheet) -> int:
 
 
 def _write_row(worksheet: Worksheet, row_index: int, values: Sequence[str | int]) -> None:
-    """Tulis ``values`` mulai kolom A pada ``row_index``."""
+    """Tulis ``values`` mulai kolom A pada ``row_index``.
+
+    String yang diawali ``=`` dipaksa menjadi teks; tanpa ini openpyxl menyimpannya
+    sebagai formula dan teks hasil scraping bisa dieksekusi saat file dibuka.
+    """
     for column, value in enumerate(values, start=1):
-        worksheet.cell(row=row_index, column=column, value=value)
+        cell = worksheet.cell(row=row_index, column=column, value=value)
+        if isinstance(value, str) and value.startswith("="):
+            cell.data_type = "s"
 
 
 def _apply_hyperlink(worksheet: Worksheet, row_index: int, url: str) -> None:

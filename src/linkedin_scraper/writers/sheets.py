@@ -57,7 +57,8 @@ class GoogleSheetsWriter:
         self.ensure_header()
         rows = [job_to_row(job) for job in jobs]
         try:
-            self._worksheet.append_rows(rows, value_input_option=ValueInputOption.user_entered)
+            # RAW: simpan nilai apa adanya agar teks scraping tidak dievaluasi sebagai formula.
+            self._worksheet.append_rows(rows, value_input_option=ValueInputOption.raw)
         except (GSpreadException, OSError) as exc:
             raise WriterError(f"Gagal menulis ke Google Sheets: {exc}") from exc
         logger.info("Menulis %d baris ke worksheet '%s'", len(rows), self._config.worksheet_name)
