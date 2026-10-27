@@ -29,6 +29,9 @@ DETAIL_PATH = "/jobs-guest/jobs/api/jobPosting/{job_id}"
 #: Kartu per halaman pada endpoint guest (terverifikasi Fase 0).
 PAGE_SIZE = 10
 
+#: Batas keras ukuran respons agar respons raksasa tidak menghabiskan memori.
+MAX_RESPONSE_BYTES = 5_000_000
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -45,6 +48,13 @@ class JobSource(Protocol):
     def fetch_detail_html(self, job_id: str) -> str:
         """Ambil HTML detail satu lowongan."""
         ...
+
+
+def _checked_base(base_url: str) -> str:
+    """Tolak basis URL non-HTTPS (mencegah SSRF bila nilainya berasal dari luar)."""
+    if not base_url.startswith("https://"):
+        raise ValueError(f"base_url harus memakai https://, bukan {base_url!r}")
+    return base_url
 
 
 def build_search_url(
@@ -82,12 +92,18 @@ def build_search_url(
         params["f_JT"] = ",".join(work_types)
     if experience_levels:
         params["f_E"] = ",".join(str(level) for level in experience_levels)
-    return f"{base_url}{SEARCH_PATH}?{urlencode(params)}"
+    return f"{_checked_base(base_url)}{SEARCH_PATH}?{urlencode(params)}"
 
 
 def build_detail_url(job_id: str, *, base_url: str = BASE_URL) -> str:
-    """Bangun URL guest untuk detail satu lowongan."""
-    return f"{base_url}{DETAIL_PATH.format(job_id=job_id)}"
+    """Bangun URL guest untuk detail satu lowongan.
+
+    Raises:
+        ValueError: ``job_id`` bukan deretan angka, atau ``base_url`` bukan HTTPS.
+    """
+    if not job_id.isdigit():
+        raise ValueError(f"job_id tidak valid: {job_id!r}")
+    return f"{_checked_base(base_url)}{DETAIL_PATH.format(job_id=job_id)}"
 
 
 class HttpSource:
@@ -103,10 +119,12 @@ class HttpSource:
         search: SearchConfig,
         *,
         backoff_sec: float = 5.0,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
         self._cfg = cfg
         self._search = search
         self._backoff_sec = backoff_sec
+        self._max_response_bytes = max_response_bytes
 
     def __enter__(self) -> HttpSource:
         return self
@@ -147,7 +165,11 @@ class HttpSource:
                 with urllib.request.urlopen(  # nosec B310
                     request, timeout=self._cfg.page_timeout_sec
                 ) as response:
-                    raw: bytes = response.read()
+                    raw: bytes = response.read(self._max_response_bytes + 1)
+                    if len(raw) > self._max_response_bytes:
+                        raise ScraperError(
+                            f"Respons terlalu besar (> {self._max_response_bytes} byte): {url}"
+                        )
                     return raw.decode("utf-8", errors="replace")
             except urllib.error.HTTPError as exc:
                 if exc.code != 429:

@@ -24,8 +24,8 @@ class _FakeResponse:
     def __init__(self, body: bytes) -> None:
         self._body = body
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, size: int = -1) -> bytes:
+        return self._body if size < 0 else self._body[:size]
 
     def __enter__(self) -> _FakeResponse:
         return self
@@ -143,3 +143,43 @@ def test_get_non_429_http_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     source = HttpSource(CONFIG, SEARCH, backoff_sec=0.0)
     with pytest.raises(ScraperError, match="HTTP 404"):
         source._get("https://example.test")
+
+
+def test_get_rejects_oversized_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        return _FakeResponse(b"01234567890")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    source = HttpSource(CONFIG, SEARCH, backoff_sec=0.0, max_response_bytes=10)
+
+    with pytest.raises(ScraperError, match="terlalu besar"):
+        source._get("https://example.test")
+
+
+def test_build_detail_url_rejects_non_numeric_id() -> None:
+    with pytest.raises(ValueError, match="job_id"):
+        build_detail_url("../../etc/passwd")
+
+
+def test_base_url_must_be_https() -> None:
+    with pytest.raises(ValueError, match="https"):
+        build_search_url("Dev", "Indonesia", 1, base_url="http://evil.test")
+    with pytest.raises(ValueError, match="https"):
+        build_detail_url("1", base_url="http://evil.test")
+
+
+def test_get_retries_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    def fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise urllib.error.URLError("connection reset")
+        return _FakeResponse(b"<html/>")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(scraper, "random_delay", lambda *_: 0.0)
+
+    source = HttpSource(CONFIG, SEARCH, backoff_sec=0.0)
+    assert source._get("https://example.test") == "<html/>"
+    assert calls["n"] == 2
