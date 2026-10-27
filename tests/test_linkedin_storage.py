@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from linkedin_scraper.exceptions import StorageError
 from linkedin_scraper.models import JobLinkedIn
 from linkedin_scraper.storage import SeenJobsDB
 
@@ -81,3 +83,18 @@ def test_file_database_roundtrip(tmp_path: Path) -> None:
         db.mark(_job(), status="matched")
     with SeenJobsDB(path) as db:
         assert db.get_status("4446754033") == "matched"
+
+
+def test_connect_error_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(target: str) -> None:
+        raise sqlite3.OperationalError("nope")
+
+    monkeypatch.setattr(sqlite3, "connect", boom)
+    with pytest.raises(StorageError, match="Tidak bisa membuka"):
+        SeenJobsDB(":memory:")
+
+
+def test_operation_after_close_is_wrapped(db: SeenJobsDB) -> None:
+    db.close()
+    with pytest.raises(StorageError):
+        db.has("x")

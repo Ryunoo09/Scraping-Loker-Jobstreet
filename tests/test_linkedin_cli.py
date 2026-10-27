@@ -15,11 +15,12 @@ from linkedin_scraper.config import (
     AppConfig,
     ExcelConfig,
     FiltersConfig,
+    GoogleSheetsConfig,
     OutputConfig,
     ScoringConfig,
     SearchConfig,
 )
-from linkedin_scraper.exceptions import RateLimitError, ScraperError
+from linkedin_scraper.exceptions import RateLimitError, ScraperError, WriterError
 from linkedin_scraper.models import JobLinkedIn
 from linkedin_scraper.parsers import parse_search_page
 from linkedin_scraper.storage import SeenJobsDB
@@ -54,6 +55,30 @@ class _FakeSource:
         if self._fail_detail:
             raise ScraperError("network error")
         return DETAIL_HTML
+
+
+class _BadStructureSource(_FakeSource):
+    """Sumber yang mengembalikan kartu rusak (tanpa judul)."""
+
+    def search_page_html(self, keyword: str, page: int) -> str:
+        return '<div class="base-card" data-entity-urn="urn:li:jobPosting:1"></div>'
+
+
+class _EmptySource(_FakeSource):
+    """Sumber tanpa kartu."""
+
+    def search_page_html(self, keyword: str, page: int) -> str:
+        return "<html><body></body></html>"
+
+
+class _FailingWriter:
+    """Writer yang selalu gagal saat append."""
+
+    def ensure_header(self) -> None:
+        return None
+
+    def append(self, jobs: list[JobLinkedIn]) -> None:
+        raise WriterError("disk full")
 
 
 def _cfg(*, fetch_detail: bool = True, min_score: int = 0) -> AppConfig:
@@ -246,3 +271,57 @@ def test_run_stops_on_rate_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     args = build_parser().parse_args(["--config", str(cfg_path)])
     assert cli.run(cfg_path, args) == 1
+
+
+def test_run_returns_error_when_writer_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg_path = _write_config(tmp_path)
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "HttpSource", lambda *a, **k: _FakeSource())
+    monkeypatch.setattr(cli, "build_writer", lambda *a, **k: _FailingWriter())
+
+    args = build_parser().parse_args(["--config", str(cfg_path), "--limit", "2"])
+    assert cli.run(cfg_path, args) == 1
+
+
+def test_run_stops_on_structure_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg_path = _write_config(tmp_path)
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "HttpSource", lambda *a, **k: _BadStructureSource())
+
+    args = build_parser().parse_args(["--config", str(cfg_path)])
+    assert cli.run(cfg_path, args) == 1
+
+
+def test_run_warns_when_no_cards(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg_path = _write_config(tmp_path)
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "HttpSource", lambda *a, **k: _EmptySource())
+
+    args = build_parser().parse_args(["--config", str(cfg_path)])
+    assert cli.run(cfg_path, args) == 0
+    assert "Tidak ada kartu" in capsys.readouterr().err
+
+
+def test_run_reset_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg_path = _write_config(tmp_path)
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "HttpSource", lambda *a, **k: _EmptySource())
+
+    args = build_parser().parse_args(["--config", str(cfg_path), "--reset-rejected"])
+    assert cli.run(cfg_path, args) == 0
+
+
+def test_describe_output_google_sheets() -> None:
+    cfg = AppConfig(
+        search=SearchConfig(keywords=["Developer"]),
+        output=OutputConfig(
+            type="google_sheets", google_sheets=GoogleSheetsConfig(spreadsheet_id="abc")
+        ),
+    )
+    assert _describe_output(cfg) == "Sheets(abc)"
